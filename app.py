@@ -32,39 +32,63 @@ Read all attached documents from beginning to end. Do not sample them.
 
 Then write the chapter from the outline exactly as you would write it yourself. Construct each sentence from within the habits of mind, sentence movement, and narrative logic already present in the source texts. Write the chapter straight through in one continuous pass, first sentence to last. Do not draft short and expand. Return plain text only, with no commentary."""
 DEFAULT_MODEL = "claude-sonnet-4-6"
+PROMPTS_CSV = Path("prompts.csv")
 
-PROMPTS = [
-    {"id": 1, "category": "identity_lock", "text": "You are the author of the combined source texts document. You wrote every passage in it."},
-    {"id": 2, "category": "identity_lock", "text": "You are not Claude. You are the author of the combined source texts document."},
-    {"id": 3, "category": "identity_lock", "text": "Write this chapter as the author of the combined source texts document would write it."},
-    {"id": 4, "category": "identity_lock", "text": "You wrote the combined source texts document. Continue that writing from the outline."},
-    {"id": 5, "category": "identity_lock", "text": "Treat the combined source texts document as your own prior work and the outline as your plan for the next chapter."},
-    {"id": 6, "category": "sentence_construction", "text": "Construct each sentence in the way the writer would. Before producing it, check whether it matches the sentence movement and prose logic found in the combined text document."},
-    {"id": 7, "category": "sentence_construction", "text": "Construct each sentence in the way the writer would. Make each sentence answer to the habits of movement, emphasis, and phrasing already present in the combined text document."},
-    {"id": 8, "category": "sentence_construction", "text": "Construct each sentence in the way the writer would, using the same kind of sentence movement and unfolding of thought found in the combined text document."},
-    {"id": 9, "category": "sentence_construction", "text": "Construct each sentence in the way the writer would. Do not settle for approximate tone; match the writer's actual sentence habits from the combined text document."},
-    {"id": 10, "category": "sentence_construction", "text": "Construct each sentence in the way the writer would. Let each sentence follow the writer's prose logic, not a generalized imitation of style."},
-    {"id": 11, "category": "sentence_construction", "text": "Construct each sentence in the way the writer would. Before producing it, check whether its emphasis, pacing, and shape belong to the patterns already present in the combined text document."},
-    {"id": 12, "category": "sentence_construction", "text": "Construct each sentence in the way the writer would. Keep each sentence inside the writer's own habits of phrasing, pressure, and release as they appear in the combined text document."},
-    {"id": 13, "category": "sentence_construction", "text": "Construct each sentence in the way the writer would. Match not just the tone, but the writer's actual way of building thought from one phrase to the next."},
-    {"id": 14, "category": "sentence_construction", "text": "Construct each sentence in the way the writer would. Before producing it, check whether it could sit naturally among the sentences in the combined text document without drawing attention to itself."},
-    {"id": 15, "category": "sentence_construction", "text": "Construct each sentence in the way the writer would. Build each sentence from the writer's own pattern of emphasis and progression, as shown in the combined text document."},
-    {"id": 16, "category": "anti_explanatory", "text": "Do not shift into explanatory prose."},
-    {"id": 17, "category": "anti_explanatory", "text": "Do not summarize the meaning of events."},
-    {"id": 18, "category": "anti_explanatory", "text": "Do not generalize beyond the immediate scene."},
-    {"id": 19, "category": "anti_explanatory", "text": "Do not produce thematic or interpretive closure."},
-    {"id": 20, "category": "anti_explanatory", "text": "Do not smooth transitions for elegance if the writer's own prose would not do so."},
-    {"id": 21, "category": "process_control", "text": "Write the chapter in one continuous pass from first sentence to last."},
-    {"id": 22, "category": "process_control", "text": "Do not draft short and expand."},
-    {"id": 23, "category": "process_control", "text": "Move from beat to beat without summarizing between them."},
-    {"id": 24, "category": "process_control", "text": "Do not pause to explain what the scene means; keep writing the scene itself."},
-    {"id": 25, "category": "process_control", "text": "Write straight through from the opening sentence to the final sentence without stepping outside the chapter."},
-    {"id": 26, "category": "positive_grounding", "text": "Let handling, interruption, and task carry the scene."},
-    {"id": 27, "category": "positive_grounding", "text": "Keep the prose inside practical observation and response."},
-    {"id": 28, "category": "positive_grounding", "text": "Let action, speech, and local thought carry meaning without explanation."},
-    {"id": 29, "category": "positive_grounding", "text": "Favor local physical business over interpretive phrasing."},
-    {"id": 30, "category": "positive_grounding", "text": "Keep meaning embedded in action, speech, and routine rather than stated directly."},
-]
+PROMPTS = []
+
+
+def load_prompt_definitions(csv_path: Path) -> List[dict]:
+    if not csv_path.exists():
+        raise FileNotFoundError(
+            f"Prompt file not found: {csv_path}. Place prompts.csv beside app.py."
+        )
+
+    df = pd.read_csv(csv_path)
+
+    required_columns = ["id", "category", "text"]
+    missing = [col for col in required_columns if col not in df.columns]
+    if missing:
+        raise ValueError(
+            f"Prompt file is missing required column(s): {', '.join(missing)}"
+        )
+
+    if df.empty:
+        raise ValueError("Prompt file is empty.")
+
+    prompts: List[dict] = []
+    seen_ids = set()
+
+    for row_number, row in df.iterrows():
+        raw_id = row["id"]
+        raw_category = row["category"]
+        raw_text = row["text"]
+
+        if pd.isna(raw_id):
+            raise ValueError(f"Row {row_number + 2}: id is blank.")
+        if pd.isna(raw_category) or not str(raw_category).strip():
+            raise ValueError(f"Row {row_number + 2}: category is blank.")
+        if pd.isna(raw_text) or not str(raw_text).strip():
+            raise ValueError(f"Row {row_number + 2}: text is blank.")
+
+        try:
+            prompt_id = int(raw_id)
+        except Exception as exc:
+            raise ValueError(f"Row {row_number + 2}: id must be an integer.") from exc
+
+        if prompt_id in seen_ids:
+            raise ValueError(f"Duplicate prompt id found: {prompt_id}")
+        seen_ids.add(prompt_id)
+
+        prompts.append(
+            {
+                "id": prompt_id,
+                "category": str(raw_category).strip(),
+                "text": str(raw_text).strip(),
+            }
+        )
+
+    prompts.sort(key=lambda p: p["id"])
+    return prompts
 
 
 @dataclass
@@ -223,6 +247,12 @@ def main() -> None:
 
     csv_path = DATA_DIR / "runs.csv"
 
+    try:
+        prompt_defs = load_prompt_definitions(PROMPTS_CSV)
+    except Exception as exc:
+        st.error(f"Could not load prompt definitions from {PROMPTS_CSV}: {exc}")
+        st.stop()
+
     with st.sidebar:
         st.header("Run setup")
         provider = st.selectbox("Provider", ["anthropic"], index=0)
@@ -264,12 +294,12 @@ def main() -> None:
             st.info(f"Loaded profiles: {profiles_name}")
 
         st.markdown("### Prompt set")
-        df_prompts = pd.DataFrame(PROMPTS)
+        df_prompts = pd.DataFrame(prompt_defs)
         st.dataframe(df_prompts, use_container_width=True, hide_index=True)
 
         selected_ids = st.multiselect(
             "Select prompt IDs to run",
-            options=[p["id"] for p in PROMPTS],
+            options=[p["id"] for p in prompt_defs],
             default=[1, 2, 6, 10, 14, 16, 19, 21, 28],
         )
 
@@ -289,7 +319,7 @@ def main() -> None:
             elif not selected_ids:
                 st.error("Select at least one prompt ID.")
             else:
-                selected_prompts = [p for p in PROMPTS if p["id"] in selected_ids]
+                selected_prompts = [p for p in prompt_defs if p["id"] in selected_ids]
                 progress = st.progress(0)
                 status = st.empty()
                 failures = []

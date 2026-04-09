@@ -97,6 +97,7 @@ class RunRecord:
     timestamp: str
     batch_label: str
     prompt_id: int
+    repetition_index: int
     category: str
     provider: str
     model: str
@@ -234,10 +235,10 @@ def export_zip(df: pd.DataFrame, outputs_root: Path) -> bytes:
     return mem.read()
 
 
-def make_file_stub(batch_label: str, prompt_id: int, run_number: int) -> str:
+def make_file_stub(batch_label: str, prompt_id: int, repetition_index: int) -> str:
     timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_batch = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in batch_label.strip())
-    return f"{timestamp_str}_{safe_batch}_p{prompt_id:02d}_r{run_number:02d}"
+    return f"{timestamp_str}_{safe_batch}_p{prompt_id:02d}_r{repetition_index:02d}"
 
 
 def main() -> None:
@@ -260,6 +261,7 @@ def main() -> None:
         api_key = st.text_input("API key", value="", type="password")
         temperature = st.slider("Temperature", 0.0, 1.5, 1.0, 0.1)
         max_tokens = st.number_input("Max output tokens", min_value=200, max_value=20000, value=3000, step=100)
+        runs_per_prompt = st.number_input("Runs per prompt", min_value=1, max_value=10, value=1, step=1, help="Repeat each selected prompt up to 10 times in the same batch.")
         batch_label = st.text_input("Batch label", value="batch1", help="Required. Used in every filename.")
 
     left, right = st.columns([1.15, 0.85])
@@ -324,11 +326,10 @@ def main() -> None:
                 status = st.empty()
                 failures = []
                 successes = 0
+                total_runs = len(selected_prompts) * int(runs_per_prompt)
+                completed_runs = 0
 
-                for run_number, prompt_obj in enumerate(selected_prompts, start=1):
-                    file_stub = make_file_stub(batch_label, prompt_obj["id"], run_number)
-                    run_id = file_stub
-
+                for prompt_position, prompt_obj in enumerate(selected_prompts, start=1):
                     payload = build_payload(
                         base_prompt=base_prompt,
                         micro_prompt=prompt_obj["text"],
@@ -337,78 +338,88 @@ def main() -> None:
                         profiles_text=profiles_text,
                     )
 
-                    payload_path = OUTPUTS_DIR / f"{file_stub}_payload.txt"
-                    output_path = OUTPUTS_DIR / f"{file_stub}_output.txt"
-                    micro_prompt_path = OUTPUTS_DIR / f"{file_stub}_prompt.txt"
-                    meta_path = OUTPUTS_DIR / f"{file_stub}_meta.json"
+                    for repetition_index in range(1, int(runs_per_prompt) + 1):
+                        file_stub = make_file_stub(batch_label, prompt_obj["id"], repetition_index)
+                        run_id = file_stub
 
-                    try:
-                        status.write(f"Running prompt {prompt_obj['id']} ({run_number} of {len(selected_prompts)})...")
-                        save_text(payload_path, payload)
-                        save_text(micro_prompt_path, prompt_obj["text"])
+                        payload_path = OUTPUTS_DIR / f"{file_stub}_payload.txt"
+                        output_path = OUTPUTS_DIR / f"{file_stub}_output.txt"
+                        micro_prompt_path = OUTPUTS_DIR / f"{file_stub}_prompt.txt"
+                        meta_path = OUTPUTS_DIR / f"{file_stub}_meta.json"
 
-                        output_text = call_anthropic(
-                            api_key=api_key,
-                            model=model,
-                            payload=payload,
-                            max_tokens=int(max_tokens),
-                            temperature=float(temperature),
-                        )
-                        save_text(output_path, output_text)
+                        try:
+                            status.write(
+                                f"Running prompt {prompt_obj['id']} rep {repetition_index}/{int(runs_per_prompt)} "
+                                f"(prompt {prompt_position}/{len(selected_prompts)}, overall {completed_runs + 1}/{total_runs})..."
+                            )
+                            save_text(payload_path, payload)
+                            save_text(micro_prompt_path, prompt_obj["text"])
 
-                        output_hash = sha256_text(output_text)
-
-                        meta = {
-                            "run_id": run_id,
-                            "timestamp": datetime.now().isoformat(timespec="seconds"),
-                            "batch_label": batch_label,
-                            "prompt_id": prompt_obj["id"],
-                            "category": prompt_obj["category"],
-                            "provider": provider,
-                            "model": model,
-                            "temperature": float(temperature),
-                            "max_tokens": int(max_tokens),
-                            "source_name": source_name,
-                            "outline_name": outline_name,
-                            "profiles_name": profiles_name,
-                            "file_stub": file_stub,
-                            "payload_file": str(payload_path),
-                            "micro_prompt_file": str(micro_prompt_path),
-                            "output_file": str(output_path),
-                            "output_sha256": output_hash,
-                        }
-                        save_text(meta_path, json.dumps(meta, indent=2))
-
-                        append_record(
-                            csv_path,
-                            RunRecord(
-                                run_id=run_id,
-                                timestamp=meta["timestamp"],
-                                batch_label=batch_label,
-                                prompt_id=prompt_obj["id"],
-                                category=prompt_obj["category"],
-                                provider=provider,
+                            output_text = call_anthropic(
+                                api_key=api_key,
                                 model=model,
-                                temperature=float(temperature),
+                                payload=payload,
                                 max_tokens=int(max_tokens),
-                                source_name=source_name,
-                                outline_name=outline_name,
-                                profiles_name=profiles_name,
-                                file_stub=file_stub,
-                                output_file=str(output_path),
-                                payload_file=str(payload_path),
-                                micro_prompt_file=str(micro_prompt_path),
-                                meta_file=str(meta_path),
-                                output_sha256=output_hash,
-                            ),
-                        )
-                        successes += 1
+                                temperature=float(temperature),
+                            )
+                            save_text(output_path, output_text)
 
-                    except Exception as exc:
-                        failures.append(f"Prompt {prompt_obj['id']}: {exc}")
+                            output_hash = sha256_text(output_text)
 
-                    progress.progress(run_number / len(selected_prompts))
-                    time.sleep(0.1)
+                            meta = {
+                                "run_id": run_id,
+                                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                                "batch_label": batch_label,
+                                "prompt_id": prompt_obj["id"],
+                                "repetition_index": repetition_index,
+                                "category": prompt_obj["category"],
+                                "provider": provider,
+                                "model": model,
+                                "temperature": float(temperature),
+                                "max_tokens": int(max_tokens),
+                                "source_name": source_name,
+                                "outline_name": outline_name,
+                                "profiles_name": profiles_name,
+                                "file_stub": file_stub,
+                                "payload_file": str(payload_path),
+                                "micro_prompt_file": str(micro_prompt_path),
+                                "output_file": str(output_path),
+                                "output_sha256": output_hash,
+                            }
+                            save_text(meta_path, json.dumps(meta, indent=2))
+
+                            append_record(
+                                csv_path,
+                                RunRecord(
+                                    run_id=run_id,
+                                    timestamp=meta["timestamp"],
+                                    batch_label=batch_label,
+                                    prompt_id=prompt_obj["id"],
+                                    repetition_index=repetition_index,
+                                    category=prompt_obj["category"],
+                                    provider=provider,
+                                    model=model,
+                                    temperature=float(temperature),
+                                    max_tokens=int(max_tokens),
+                                    source_name=source_name,
+                                    outline_name=outline_name,
+                                    profiles_name=profiles_name,
+                                    file_stub=file_stub,
+                                    output_file=str(output_path),
+                                    payload_file=str(payload_path),
+                                    micro_prompt_file=str(micro_prompt_path),
+                                    meta_file=str(meta_path),
+                                    output_sha256=output_hash,
+                                ),
+                            )
+                            successes += 1
+
+                        except Exception as exc:
+                            failures.append(f"Prompt {prompt_obj['id']} rep {repetition_index}: {exc}")
+
+                        completed_runs += 1
+                        progress.progress(completed_runs / total_runs)
+                        time.sleep(0.1)
 
                 if successes:
                     st.success(f"Completed {successes} run(s). Files written to: {OUTPUTS_DIR}")
@@ -478,6 +489,7 @@ def main() -> None:
                 "run_id": str(current.get("run_id", "")),
                 "batch_label": str(current.get("batch_label", "")),
                 "prompt_id": int(current.get("prompt_id", 0)),
+                "repetition_index": int(current.get("repetition_index", 0)) if not pd.isna(current.get("repetition_index", 0)) else 0,
                 "category": str(current.get("category", "")),
                 "file_stub": str(current.get("file_stub", "")),
                 "output_sha256": str(current.get("output_sha256", "")),

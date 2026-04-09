@@ -30,3 +30,4 @@ id,category,text
 29,positive_grounding,Favor local physical business over interpretive phrasing.
 30,positive_grounding,"Keep meaning embedded in action, speech, and routine rather than stated directly."
 31,sentence_construction,"Construct each sentence in the way the writer would. Before producing it, check whether its movement, emphasis, pacing, and shape belong to the patterns already present in the combined text document, and build the thought from one phrase to the next the way the writer does there."
+32,sentence_construction,"Construct each sentence in the way the writer would. Before producing it, check whether its movement, pacing, and shape belong to the patterns already present in the combined text document."

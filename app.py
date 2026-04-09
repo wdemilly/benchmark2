@@ -181,6 +181,16 @@ def count_words(text: str) -> int:
     return len(text.split())
 
 
+def parse_boolish(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in {"true", "1", "yes", "y"}
+
+
 def load_records(csv_path: Path) -> pd.DataFrame:
     if csv_path.exists():
         return pd.read_csv(csv_path)
@@ -292,8 +302,9 @@ def generate_with_retry(
         input_tokens, output_tokens = extract_usage(resp)
         output_words = count_words(output_text)
 
+        hit_token_ceiling = stop_reason == "max_tokens"
         should_retry = (
-            stop_reason == "max_tokens"
+            hit_token_ceiling
             and attempt <= retry_limit
             and current_max_tokens < UI_MAX_TOKENS
         )
@@ -302,17 +313,8 @@ def generate_with_retry(
             current_max_tokens = min(current_max_tokens * 2, UI_MAX_TOKENS)
             continue
 
-        truncation_flag = False
-        truncation_reason = ""
-
-        if stop_reason == "max_tokens":
-            truncation_flag = True
-            truncation_reason = "Model stopped at max_tokens."
-        elif output_words < MIN_EXPECTED_WORDS:
-            truncation_flag = True
-            truncation_reason = (
-                f"Output is shorter than expected ({output_words} words; expected roughly {MIN_EXPECTED_WORDS}+)."
-            )
+        truncation_flag = hit_token_ceiling
+        truncation_reason = "Model stopped at max_tokens." if hit_token_ceiling else ""
 
         return {
             "text": output_text,
@@ -670,8 +672,6 @@ def main() -> None:
 
             if str(current.get("stop_reason", "") or "") == "max_tokens":
                 st.error("Run hit the token ceiling and should be treated as truncated.")
-            elif bool(current.get("truncation_flag", False)):
-                st.warning(f"Run flagged for possible truncation: {str(current.get('truncation_reason', ''))}")
 
             metadata_items = {
                 "run_id": str(current.get("run_id", "")),
@@ -686,7 +686,7 @@ def main() -> None:
                 "input_tokens": None if pd.isna(current.get("input_tokens")) else int(current.get("input_tokens")),
                 "output_tokens": None if pd.isna(current.get("output_tokens")) else int(current.get("output_tokens")),
                 "output_words": None if pd.isna(current.get("output_words")) else int(current.get("output_words")),
-                "truncation_flag": bool(current.get("truncation_flag", False)),
+                "truncation_flag": parse_boolish(current.get("truncation_flag", False)),
                 "truncation_reason": str(current.get("truncation_reason", "")),
             }
 

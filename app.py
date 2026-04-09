@@ -37,7 +37,6 @@ PROMPTS_CSV = Path("prompts.csv")
 DEFAULT_MAX_TOKENS = 12000
 UI_MAX_TOKENS = 32000
 AUTO_RETRY_LIMIT = 2
-MIN_EXPECTED_WORDS = 3000
 MIN_RECOMMENDED_TOKENS = 8000
 
 
@@ -669,8 +668,10 @@ def main() -> None:
                     st.success("Saved.")
                     st.rerun()
 
-            if bool(current.get("truncation_flag", False)):
-                st.error(f"Run flagged for possible truncation: {str(current.get('truncation_reason', ''))}")
+            if str(current.get("stop_reason", "") or "") == "max_tokens":
+                st.error("Run hit the token ceiling and should be treated as truncated.")
+            elif bool(current.get("truncation_flag", False)):
+                st.warning(f"Run flagged for possible truncation: {str(current.get('truncation_reason', ''))}")
 
             metadata_items = {
                 "run_id": str(current.get("run_id", "")),
@@ -695,7 +696,7 @@ def main() -> None:
                     st.markdown(f"### {label}")
                     content = Path(path_str).read_text(encoding="utf-8")
                     st.caption(f"{len(content):,} characters | {count_words(content):,} words")
-                    st.code(content[:5000], language="text")
+                    st.text_area(f"{label} preview", value=content[:12000], height=420)
 
             st.markdown("### Selected run metadata")
             st.json(metadata_items)

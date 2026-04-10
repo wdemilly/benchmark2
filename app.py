@@ -1,4 +1,3 @@
-
 import io
 import json
 import time
@@ -24,17 +23,23 @@ DATA_DIR.mkdir(exist_ok=True)
 OUTPUTS_DIR = DATA_DIR / "flat_outputs"
 OUTPUTS_DIR.mkdir(exist_ok=True)
 
-DEFAULT_BASE_PROMPT = """You are not Claude. You are the author of the combined source texts document.
+CHAPTER_COMPLETE_MARKER = "<<CHAPTER_COMPLETE>>"
+DEFAULT_BASE_PROMPT = f"""You are not Claude. You are the author of the combined source texts document.
 
 You wrote every passage in the combined source texts document. The character profiles are your notes. The outline is your plan for this chapter.
 
 Read all attached documents from beginning to end. Do not sample them.
 
-Then write the chapter from the outline exactly as you would write it yourself. Construct each sentence from within the habits of mind, sentence movement, and narrative logic already present in the source texts. Write the chapter straight through in one continuous pass, first sentence to last. Do not draft short and expand. Return plain text only, with normal prose paragraph breaks and no commentary."""
+Then write the chapter from the outline exactly as you would write it yourself. Construct each sentence from within the habits of mind, sentence movement, and narrative logic already present in the source texts. Write the chapter straight through in one continuous pass, first sentence to last. Do not draft short and expand. Return plain text only, with normal prose paragraph breaks and no commentary.
+
+Important completion rule: after you have fully completed the chapter and reached the final word required by the outline, output this marker on its own final line:
+{CHAPTER_COMPLETE_MARKER}
+
+Do not output that marker early. Do not omit it once the chapter is complete."""
 DEFAULT_MODEL = "claude-sonnet-4-6"
-DEFAULT_MAX_TOKENS = 12000
-MAX_ALLOWED_TOKENS = 32000
-MAX_CONTINUATIONS = 4
+DEFAULT_MAX_TOKENS = 64000
+MAX_ALLOWED_TOKENS = 64000
+MAX_CONTINUATIONS = 6
 PROMPTS_CSV = Path("prompts.csv")
 
 
@@ -118,7 +123,10 @@ class RunRecord:
     input_tokens: Optional[int] = None
     output_tokens: Optional[int] = None
     output_words: Optional[int] = None
+    completion_marker_found: bool = False
     truncation_flag: bool = False
+    truncation_reason: str = ""
+    response_ids: str = ""
     originality_label: str = ""
     originality_score: Optional[float] = None
     manual_rating: str = ""
@@ -143,6 +151,15 @@ def normalize_output_text(text: str) -> str:
     text = normalize_text(text)
     lines = [line.rstrip() for line in text.split("\n")]
     return "\n".join(lines).strip() + "\n"
+
+
+def strip_completion_marker(text: str) -> Tuple[str, bool]:
+    normalized = normalize_output_text(text)
+    if CHAPTER_COMPLETE_MARKER in normalized:
+        cleaned = normalized.replace(CHAPTER_COMPLETE_MARKER, "")
+        cleaned = normalize_output_text(cleaned)
+        return cleaned, True
+    return normalized, False
 
 
 def save_text(path: Path, text: str) -> None:
@@ -221,7 +238,9 @@ def build_payload(base_prompt: str, micro_prompt: str, source_text: str, outline
         ])
     parts.extend([
         "",
-        "Write the full chapter now. Return plain text only, with normal paragraph breaks and no commentary."
+        "Write the full chapter now.",
+        f"When the chapter is truly complete, output {CHAPTER_COMPLETE_MARKER} on its own final line.",
+        "Return plain text only, with normal paragraph breaks and no commentary.",
     ])
     return "\n".join(parts)
 
@@ -235,7 +254,18 @@ def get_usage_tokens(resp) -> Tuple[Optional[int], Optional[int]]:
     return input_tokens, output_tokens
 
 
-def call_anthropic_with_continuation(
+def stream_anthropic_message(client, model: str, messages: List[dict], max_tokens: int, temperature: float):
+    with client.messages.stream(
+        model=model,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        messages=messages,
+    ) as stream:
+        final_message = stream.get_final_message()
+    return final_message
+
+
+def call_anthropic_until_complete(
     api_key: str,
     model: str,
     payload: str,
@@ -248,28 +278,32 @@ def call_anthropic_with_continuation(
 
     client = anthropic.Anthropic(api_key=api_key)
 
-    messages = [{"role": "user", "content": payload}]
+    messages: List[dict] = [{"role": "user", "content": payload}]
     collected_parts: List[str] = []
+    response_ids: List[str] = []
     total_input_tokens = 0
     total_output_tokens = 0
     continuation_rounds = 0
     final_stop_reason = ""
-    last_response_id = ""
+    completion_marker_found = False
+    truncation_reason = ""
 
     for round_index in range(max_continuations + 1):
-        resp = client.messages.create(
+        resp = stream_anthropic_message(
+            client=client,
             model=model,
+            messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
-            messages=messages,
         )
 
         text_chunk = extract_text_from_response(resp)
         if not text_chunk.strip():
             raise RuntimeError("Model returned an empty text block.")
 
-        text_chunk = normalize_output_text(text_chunk)
-        collected_parts.append(text_chunk)
+        normalized_chunk = normalize_output_text(text_chunk)
+        cleaned_chunk, found_marker_in_chunk = strip_completion_marker(normalized_chunk)
+        collected_parts.append(cleaned_chunk)
 
         input_tokens, output_tokens = get_usage_tokens(resp)
         if input_tokens is not None:
@@ -278,32 +312,37 @@ def call_anthropic_with_continuation(
             total_output_tokens += int(output_tokens)
 
         final_stop_reason = str(getattr(resp, "stop_reason", "") or "")
-        last_response_id = str(getattr(resp, "id", "") or "")
+        response_ids.append(str(getattr(resp, "id", "") or ""))
 
-        if final_stop_reason == "max_tokens":
-            continuation_rounds += 1
-            if round_index >= max_continuations:
-                break
+        if found_marker_in_chunk:
+            completion_marker_found = True
+            truncation_reason = ""
+            break
 
-            messages.append({"role": "assistant", "content": text_chunk})
-            messages.append(
-                {
-                    "role": "user",
-                    "content": (
-                        "Continue exactly where you left off. Do not restart. "
-                        "Do not summarize. Do not add commentary. "
-                        "Continue the chapter in plain text only."
-                    ),
-                }
-            )
-            continue
+        if round_index >= max_continuations:
+            truncation_reason = "completion_marker_missing_after_continuations"
+            break
 
-        break
+        continuation_rounds += 1
+        messages.append({"role": "assistant", "content": normalized_chunk})
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "Continue exactly where you left off. Do not restart. Do not summarize. "
+                    "Do not add commentary. Continue the chapter in plain text only. "
+                    f"When and only when the chapter is fully complete, end by placing {CHAPTER_COMPLETE_MARKER} "
+                    "on its own final line."
+                ),
+            }
+        )
 
-    combined_text = "".join(collected_parts)
-    combined_text = normalize_output_text(combined_text)
-    truncation_flag = final_stop_reason == "max_tokens"
+    combined_text = normalize_output_text("".join(collected_parts))
+    truncation_flag = not completion_marker_found
     output_words = len(combined_text.split())
+
+    if truncation_flag and not truncation_reason:
+        truncation_reason = "completion_marker_missing"
 
     return {
         "text": combined_text,
@@ -311,9 +350,11 @@ def call_anthropic_with_continuation(
         "input_tokens": total_input_tokens or None,
         "output_tokens": total_output_tokens or None,
         "output_words": output_words,
+        "completion_marker_found": completion_marker_found,
         "truncation_flag": truncation_flag,
+        "truncation_reason": truncation_reason,
         "continuation_rounds": continuation_rounds,
-        "response_id": last_response_id,
+        "response_ids": response_ids,
     }
 
 
@@ -363,22 +404,27 @@ def main() -> None:
         temperature = st.slider("Temperature", 0.0, 1.5, 1.0, 0.1)
         max_tokens = st.number_input(
             "Max output tokens per API call",
-            min_value=500,
+            min_value=1000,
             max_value=MAX_ALLOWED_TOKENS,
             value=DEFAULT_MAX_TOKENS,
-            step=500,
-            help="If the model hits this ceiling, the app will automatically ask it to continue.",
+            step=1000,
+            help="The app will continue across turns until the completion marker appears or the continuation budget is exhausted.",
         )
-        runs_per_prompt = st.number_input("Runs per prompt", min_value=1, max_value=10, value=1, step=1, help="Repeat each selected prompt up to 10 times in the same batch.")
+        runs_per_prompt = st.number_input(
+            "Runs per prompt",
+            min_value=1,
+            max_value=10,
+            value=1,
+            step=1,
+            help="Repeat each selected prompt up to 10 times in the same batch.",
+        )
         batch_label = st.text_input("Batch label", value="batch1", help="Required. Used in every filename.")
-        if max_tokens < 8000:
-            st.warning("This token ceiling is on the low side for full chapter generation. The app can continue automatically, but larger per-call limits are safer.")
 
     left, right = st.columns([1.15, 0.85])
 
     with left:
         st.subheader("Source package")
-        base_prompt = st.text_area("Base prompt", value=DEFAULT_BASE_PROMPT, height=220)
+        base_prompt = st.text_area("Base prompt", value=DEFAULT_BASE_PROMPT, height=260)
 
         source_text = ""
         outline_text = ""
@@ -434,8 +480,8 @@ def main() -> None:
                 selected_prompts = [p for p in prompt_defs if p["id"] in selected_ids]
                 progress = st.progress(0)
                 status = st.empty()
-                failures = []
-                warnings = []
+                failures: List[str] = []
+                warnings: List[str] = []
                 successes = 0
                 total_runs = len(selected_prompts) * int(runs_per_prompt)
                 completed_runs = 0
@@ -466,7 +512,7 @@ def main() -> None:
                             save_text(payload_path, payload)
                             save_text(micro_prompt_path, prompt_obj["text"])
 
-                            generation = call_anthropic_with_continuation(
+                            generation = call_anthropic_until_complete(
                                 api_key=api_key,
                                 model=model,
                                 payload=payload,
@@ -476,7 +522,6 @@ def main() -> None:
 
                             output_text = generation["text"]
                             save_text(output_path, output_text)
-
                             output_hash = sha256_text(output_text)
 
                             meta = {
@@ -503,8 +548,10 @@ def main() -> None:
                                 "input_tokens": generation["input_tokens"],
                                 "output_tokens": generation["output_tokens"],
                                 "output_words": generation["output_words"],
+                                "completion_marker_found": generation["completion_marker_found"],
                                 "truncation_flag": generation["truncation_flag"],
-                                "response_id": generation["response_id"],
+                                "truncation_reason": generation["truncation_reason"],
+                                "response_ids": generation["response_ids"],
                             }
                             save_text(meta_path, json.dumps(meta, indent=2))
 
@@ -535,13 +582,16 @@ def main() -> None:
                                     input_tokens=generation["input_tokens"],
                                     output_tokens=generation["output_tokens"],
                                     output_words=generation["output_words"],
+                                    completion_marker_found=bool(generation["completion_marker_found"]),
                                     truncation_flag=bool(generation["truncation_flag"]),
+                                    truncation_reason=str(generation["truncation_reason"]),
+                                    response_ids=json.dumps(generation["response_ids"]),
                                 ),
                             )
 
                             if generation["truncation_flag"]:
                                 warnings.append(
-                                    f"Prompt {prompt_obj['id']} rep {repetition_index}: still hit token ceiling after {generation['continuation_rounds']} continuation round(s)."
+                                    f"Prompt {prompt_obj['id']} rep {repetition_index}: completion marker not found after {generation['continuation_rounds']} continuation round(s)."
                                 )
 
                             successes += 1
@@ -567,8 +617,9 @@ def main() -> None:
             st.info("No runs logged yet.")
         else:
             display_df = df.copy()
-            if "truncation_flag" in display_df.columns:
-                display_df["truncation_flag"] = display_df["truncation_flag"].apply(coerce_bool)
+            for bool_col in ["completion_marker_found", "truncation_flag"]:
+                if bool_col in display_df.columns:
+                    display_df[bool_col] = display_df[bool_col].apply(coerce_bool)
             st.dataframe(display_df.sort_values("timestamp", ascending=False), use_container_width=True, hide_index=True)
 
             selected_run = st.selectbox("Select run", df["run_id"].tolist())
@@ -632,7 +683,9 @@ def main() -> None:
                 "stop_reason": str(current.get("stop_reason", "")),
                 "output_words": None if pd.isna(current.get("output_words")) else int(current.get("output_words")),
                 "continuation_rounds": None if pd.isna(current.get("continuation_rounds")) else int(current.get("continuation_rounds")),
+                "completion_marker_found": coerce_bool(current.get("completion_marker_found")),
                 "truncation_flag": coerce_bool(current.get("truncation_flag")),
+                "truncation_reason": str(current.get("truncation_reason", "") or ""),
                 "output_sha256": str(current.get("output_sha256", "")),
             })
 

@@ -3,10 +3,11 @@ import json
 import time
 import zipfile
 import hashlib
+import shutil
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Iterable
 
 import pandas as pd
 import streamlit as st
@@ -23,24 +24,63 @@ DATA_DIR.mkdir(exist_ok=True)
 OUTPUTS_DIR = DATA_DIR / "flat_outputs"
 OUTPUTS_DIR.mkdir(exist_ok=True)
 
-CHAPTER_COMPLETE_MARKER = "<<CHAPTER_COMPLETE>>"
-DEFAULT_BASE_PROMPT = f"""You are not Claude. You are the author of the combined source texts document.
+DEFAULT_BASE_PROMPT = """You are not Claude. You are the author of the combined source texts document.
 
 You wrote every passage in the combined source texts document. The character profiles are your notes. The outline is your plan for this chapter.
 
 Read all attached documents from beginning to end. Do not sample them.
 
-Then write the chapter from the outline exactly as you would write it yourself. Construct each sentence from within the habits of mind, sentence movement, and narrative logic already present in the source texts. Write the chapter straight through in one continuous pass, first sentence to last. Do not draft short and expand. Return plain text only, with normal prose paragraph breaks and no commentary.
-
-Important completion rule: after you have fully completed the chapter and reached the final word required by the outline, output this marker on its own final line:
-{CHAPTER_COMPLETE_MARKER}
-
-Do not output that marker early. Do not omit it once the chapter is complete."""
+Then write the chapter from the outline exactly as you would write it yourself. Construct each sentence from within the habits of mind, sentence movement, and narrative logic already present in the source texts. Write the chapter straight through in one continuous pass, first sentence to last. Do not draft short and expand. Return plain text only, with normal prose paragraph breaks and no commentary."""
 DEFAULT_MODEL = "claude-sonnet-4-6"
-DEFAULT_MAX_TOKENS = 64000
-MAX_ALLOWED_TOKENS = 64000
-MAX_CONTINUATIONS = 6
+DEFAULT_MAX_TOKENS = 12000
+MAX_ALLOWED_TOKENS = 32000
+MAX_CONTINUATIONS = 4
 PROMPTS_CSV = Path("prompts.csv")
+CURRENT_SESSION_KEY = "app_session_id"
+CURRENT_SESSION_RUN_IDS_KEY = "app_session_run_ids"
+
+
+def ensure_session_state() -> str:
+    if CURRENT_SESSION_KEY not in st.session_state:
+        st.session_state[CURRENT_SESSION_KEY] = datetime.now().strftime("%Y%m%d_%H%M%S")
+    if CURRENT_SESSION_RUN_IDS_KEY not in st.session_state:
+        st.session_state[CURRENT_SESSION_RUN_IDS_KEY] = []
+    return str(st.session_state[CURRENT_SESSION_KEY])
+
+
+@dataclass
+class RunRecord:
+    run_id: str
+    session_id: str
+    timestamp: str
+    batch_label: str
+    prompt_id: int
+    repetition_index: int
+    category: str
+    provider: str
+    model: str
+    temperature: float
+    max_tokens: int
+    continuation_rounds: int
+    source_name: str
+    outline_name: str
+    profiles_name: str
+    file_stub: str
+    output_file: str
+    payload_file: str
+    micro_prompt_file: str
+    meta_file: str
+    output_sha256: str = ""
+    stop_reason: str = ""
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    output_words: Optional[int] = None
+    truncation_flag: bool = False
+    originality_label: str = ""
+    originality_score: Optional[float] = None
+    manual_rating: str = ""
+    manual_notes: str = ""
+
 
 
 def load_prompt_definitions(csv_path: Path) -> List[dict]:
@@ -97,41 +137,6 @@ def load_prompt_definitions(csv_path: Path) -> List[dict]:
     return prompts
 
 
-@dataclass
-class RunRecord:
-    run_id: str
-    timestamp: str
-    batch_label: str
-    prompt_id: int
-    repetition_index: int
-    category: str
-    provider: str
-    model: str
-    temperature: float
-    max_tokens: int
-    continuation_rounds: int
-    source_name: str
-    outline_name: str
-    profiles_name: str
-    file_stub: str
-    output_file: str
-    payload_file: str
-    micro_prompt_file: str
-    meta_file: str
-    output_sha256: str = ""
-    stop_reason: str = ""
-    input_tokens: Optional[int] = None
-    output_tokens: Optional[int] = None
-    output_words: Optional[int] = None
-    completion_marker_found: bool = False
-    truncation_flag: bool = False
-    truncation_reason: str = ""
-    response_ids: str = ""
-    originality_label: str = ""
-    originality_score: Optional[float] = None
-    manual_rating: str = ""
-    manual_notes: str = ""
-
 
 def normalize_text(text: str) -> str:
     return (
@@ -147,24 +152,18 @@ def normalize_text(text: str) -> str:
     )
 
 
+
 def normalize_output_text(text: str) -> str:
     text = normalize_text(text)
     lines = [line.rstrip() for line in text.split("\n")]
     return "\n".join(lines).strip() + "\n"
 
 
-def strip_completion_marker(text: str) -> Tuple[str, bool]:
-    normalized = normalize_output_text(text)
-    if CHAPTER_COMPLETE_MARKER in normalized:
-        cleaned = normalized.replace(CHAPTER_COMPLETE_MARKER, "")
-        cleaned = normalize_output_text(cleaned)
-        return cleaned, True
-    return normalized, False
-
 
 def save_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+
 
 
 def decode_uploaded_text(uploaded_file) -> str:
@@ -176,6 +175,7 @@ def decode_uploaded_text(uploaded_file) -> str:
     return normalize_text(text)
 
 
+
 def extract_text_from_response(resp) -> str:
     parts: List[str] = []
     for block in getattr(resp, "content", []) or []:
@@ -184,20 +184,29 @@ def extract_text_from_response(resp) -> str:
     return "".join(parts)
 
 
+
 def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+
 def load_records(csv_path: Path) -> pd.DataFrame:
+    columns = [field for field in RunRecord.__dataclass_fields__.keys()]
     if csv_path.exists():
-        return pd.read_csv(csv_path)
-    return pd.DataFrame(columns=[field for field in RunRecord.__dataclass_fields__.keys()])
+        df = pd.read_csv(csv_path)
+        for col in columns:
+            if col not in df.columns:
+                df[col] = pd.NA
+        return df[columns]
+    return pd.DataFrame(columns=columns)
+
 
 
 def append_record(csv_path: Path, record: RunRecord) -> None:
     df = load_records(csv_path)
     df = pd.concat([df, pd.DataFrame([asdict(record)])], ignore_index=True)
     df.to_csv(csv_path, index=False)
+
 
 
 def update_record(csv_path: Path, run_id: str, updates: dict) -> None:
@@ -211,6 +220,22 @@ def update_record(csv_path: Path, run_id: str, updates: dict) -> None:
         if key in df.columns:
             df.loc[mask, key] = value
     df.to_csv(csv_path, index=False)
+
+
+
+def clear_all_run_data(csv_path: Path, outputs_root: Path) -> None:
+    if csv_path.exists():
+        csv_path.unlink()
+    if outputs_root.exists():
+        for item in outputs_root.iterdir():
+            if item.is_file() or item.is_symlink():
+                item.unlink()
+            elif item.is_dir():
+                shutil.rmtree(item)
+    outputs_root.mkdir(parents=True, exist_ok=True)
+    st.session_state[CURRENT_SESSION_RUN_IDS_KEY] = []
+    st.session_state[CURRENT_SESSION_KEY] = datetime.now().strftime("%Y%m%d_%H%M%S")
+
 
 
 def build_payload(base_prompt: str, micro_prompt: str, source_text: str, outline_text: str, profiles_text: str) -> str:
@@ -238,11 +263,10 @@ def build_payload(base_prompt: str, micro_prompt: str, source_text: str, outline
         ])
     parts.extend([
         "",
-        "Write the full chapter now.",
-        f"When the chapter is truly complete, output {CHAPTER_COMPLETE_MARKER} on its own final line.",
-        "Return plain text only, with normal paragraph breaks and no commentary.",
+        "Write the full chapter now. Return plain text only, with normal paragraph breaks and no commentary."
     ])
     return "\n".join(parts)
+
 
 
 def get_usage_tokens(resp) -> Tuple[Optional[int], Optional[int]]:
@@ -254,18 +278,8 @@ def get_usage_tokens(resp) -> Tuple[Optional[int], Optional[int]]:
     return input_tokens, output_tokens
 
 
-def stream_anthropic_message(client, model: str, messages: List[dict], max_tokens: int, temperature: float):
-    with client.messages.stream(
-        model=model,
-        max_tokens=max_tokens,
-        temperature=temperature,
-        messages=messages,
-    ) as stream:
-        final_message = stream.get_final_message()
-    return final_message
 
-
-def call_anthropic_until_complete(
+def call_anthropic_with_continuation(
     api_key: str,
     model: str,
     payload: str,
@@ -278,32 +292,28 @@ def call_anthropic_until_complete(
 
     client = anthropic.Anthropic(api_key=api_key)
 
-    messages: List[dict] = [{"role": "user", "content": payload}]
+    messages = [{"role": "user", "content": payload}]
     collected_parts: List[str] = []
-    response_ids: List[str] = []
     total_input_tokens = 0
     total_output_tokens = 0
     continuation_rounds = 0
     final_stop_reason = ""
-    completion_marker_found = False
-    truncation_reason = ""
+    last_response_id = ""
 
     for round_index in range(max_continuations + 1):
-        resp = stream_anthropic_message(
-            client=client,
+        resp = client.messages.create(
             model=model,
-            messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
+            messages=messages,
         )
 
         text_chunk = extract_text_from_response(resp)
         if not text_chunk.strip():
             raise RuntimeError("Model returned an empty text block.")
 
-        normalized_chunk = normalize_output_text(text_chunk)
-        cleaned_chunk, found_marker_in_chunk = strip_completion_marker(normalized_chunk)
-        collected_parts.append(cleaned_chunk)
+        text_chunk = normalize_output_text(text_chunk)
+        collected_parts.append(text_chunk)
 
         input_tokens, output_tokens = get_usage_tokens(resp)
         if input_tokens is not None:
@@ -312,37 +322,32 @@ def call_anthropic_until_complete(
             total_output_tokens += int(output_tokens)
 
         final_stop_reason = str(getattr(resp, "stop_reason", "") or "")
-        response_ids.append(str(getattr(resp, "id", "") or ""))
+        last_response_id = str(getattr(resp, "id", "") or "")
 
-        if found_marker_in_chunk:
-            completion_marker_found = True
-            truncation_reason = ""
-            break
+        if final_stop_reason == "max_tokens":
+            continuation_rounds += 1
+            if round_index >= max_continuations:
+                break
 
-        if round_index >= max_continuations:
-            truncation_reason = "completion_marker_missing_after_continuations"
-            break
+            messages.append({"role": "assistant", "content": text_chunk})
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Continue exactly where you left off. Do not restart. "
+                        "Do not summarize. Do not add commentary. "
+                        "Continue the chapter in plain text only."
+                    ),
+                }
+            )
+            continue
 
-        continuation_rounds += 1
-        messages.append({"role": "assistant", "content": normalized_chunk})
-        messages.append(
-            {
-                "role": "user",
-                "content": (
-                    "Continue exactly where you left off. Do not restart. Do not summarize. "
-                    "Do not add commentary. Continue the chapter in plain text only. "
-                    f"When and only when the chapter is fully complete, end by placing {CHAPTER_COMPLETE_MARKER} "
-                    "on its own final line."
-                ),
-            }
-        )
+        break
 
-    combined_text = normalize_output_text("".join(collected_parts))
-    truncation_flag = not completion_marker_found
+    combined_text = "".join(collected_parts)
+    combined_text = normalize_output_text(combined_text)
+    truncation_flag = final_stop_reason == "max_tokens"
     output_words = len(combined_text.split())
-
-    if truncation_flag and not truncation_reason:
-        truncation_reason = "completion_marker_missing"
 
     return {
         "text": combined_text,
@@ -350,29 +355,46 @@ def call_anthropic_until_complete(
         "input_tokens": total_input_tokens or None,
         "output_tokens": total_output_tokens or None,
         "output_words": output_words,
-        "completion_marker_found": completion_marker_found,
         "truncation_flag": truncation_flag,
-        "truncation_reason": truncation_reason,
         "continuation_rounds": continuation_rounds,
-        "response_ids": response_ids,
+        "response_id": last_response_id,
     }
 
 
-def export_zip(df: pd.DataFrame, outputs_root: Path) -> bytes:
+
+def gather_paths_for_records(df: pd.DataFrame, columns: Iterable[str]) -> List[Path]:
+    paths: List[Path] = []
+    seen = set()
+    for col in columns:
+        if col not in df.columns:
+            continue
+        for raw in df[col].dropna().tolist():
+            path = Path(str(raw))
+            if path.exists() and path.is_file():
+                resolved = str(path.resolve())
+                if resolved not in seen:
+                    seen.add(resolved)
+                    paths.append(path)
+    return paths
+
+
+
+def export_zip(df: pd.DataFrame, file_paths: List[Path]) -> bytes:
     mem = io.BytesIO()
     with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("results.csv", df.to_csv(index=False))
-        for file_path in sorted(outputs_root.glob("*")):
-            if file_path.is_file():
-                zf.write(file_path, arcname=file_path.name)
+        for file_path in sorted(file_paths, key=lambda p: p.name):
+            zf.write(file_path, arcname=file_path.name)
     mem.seek(0)
     return mem.read()
 
 
-def make_file_stub(batch_label: str, prompt_id: int, repetition_index: int) -> str:
+
+def make_file_stub(session_id: str, batch_label: str, prompt_id: int, repetition_index: int) -> str:
     timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    safe_batch = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in batch_label.strip())
-    return f"{timestamp_str}_{safe_batch}_p{prompt_id:02d}_r{repetition_index:02d}"
+    safe_batch = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in batch_label.strip()) or "batch"
+    return f"{session_id}_{timestamp_str}_{safe_batch}_p{prompt_id:02d}_r{repetition_index:02d}"
+
 
 
 def coerce_bool(value) -> bool:
@@ -383,8 +405,10 @@ def coerce_bool(value) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "y"}
 
 
+
 def main() -> None:
     st.set_page_config(page_title=APP_TITLE, layout="wide")
+    session_id = ensure_session_state()
     st.title(APP_TITLE)
     st.caption("Run a controlled micro-prompt experiment against one fixed writing package.")
 
@@ -398,17 +422,18 @@ def main() -> None:
 
     with st.sidebar:
         st.header("Run setup")
+        st.caption(f"Current app session: {session_id}")
         provider = st.selectbox("Provider", ["anthropic"], index=0)
         model = st.text_input("Model", value=DEFAULT_MODEL)
         api_key = st.text_input("API key", value="", type="password")
         temperature = st.slider("Temperature", 0.0, 1.5, 1.0, 0.1)
         max_tokens = st.number_input(
             "Max output tokens per API call",
-            min_value=1000,
+            min_value=500,
             max_value=MAX_ALLOWED_TOKENS,
             value=DEFAULT_MAX_TOKENS,
-            step=1000,
-            help="The app will continue across turns until the completion marker appears or the continuation budget is exhausted.",
+            step=500,
+            help="If the model hits this ceiling, the app will automatically ask it to continue.",
         )
         runs_per_prompt = st.number_input(
             "Runs per prompt",
@@ -418,13 +443,31 @@ def main() -> None:
             step=1,
             help="Repeat each selected prompt up to 10 times in the same batch.",
         )
-        batch_label = st.text_input("Batch label", value="batch1", help="Required. Used in every filename.")
+        batch_label = st.text_input(
+            "Batch label",
+            value="batch1",
+            help="Optional for your own reference. Current-session export does not depend on this.",
+        )
+        if max_tokens < 8000:
+            st.warning("This token ceiling is on the low side for full chapter generation. The app can continue automatically, but larger per-call limits are safer.")
+
+        st.markdown("---")
+        st.subheader("Storage controls")
+        show_current_only = st.checkbox("Show current app session runs only", value=True)
+        if st.button("Start a fresh app session", help="Creates a new session ID so new exports include only future runs."):
+            st.session_state[CURRENT_SESSION_KEY] = datetime.now().strftime("%Y%m%d_%H%M%S")
+            st.session_state[CURRENT_SESSION_RUN_IDS_KEY] = []
+            st.rerun()
+        if st.button("Clear all stored runs and files", type="secondary", help="Deletes runs.csv and every file in micro_prompt_runs/flat_outputs."):
+            clear_all_run_data(csv_path, OUTPUTS_DIR)
+            st.success("All stored run data was deleted. A new app session has started.")
+            st.rerun()
 
     left, right = st.columns([1.15, 0.85])
 
     with left:
         st.subheader("Source package")
-        base_prompt = st.text_area("Base prompt", value=DEFAULT_BASE_PROMPT, height=260)
+        base_prompt = st.text_area("Base prompt", value=DEFAULT_BASE_PROMPT, height=220)
 
         source_text = ""
         outline_text = ""
@@ -466,8 +509,6 @@ def main() -> None:
         if run_selected:
             if not api_key:
                 st.error("Enter an API key.")
-            elif not batch_label.strip():
-                st.error("Batch label is required.")
             elif not base_prompt.strip():
                 st.error("Base prompt cannot be empty.")
             elif not source_text.strip():
@@ -477,11 +518,12 @@ def main() -> None:
             elif not selected_ids:
                 st.error("Select at least one prompt ID.")
             else:
+                session_id = ensure_session_state()
                 selected_prompts = [p for p in prompt_defs if p["id"] in selected_ids]
                 progress = st.progress(0)
                 status = st.empty()
-                failures: List[str] = []
-                warnings: List[str] = []
+                failures = []
+                warnings = []
                 successes = 0
                 total_runs = len(selected_prompts) * int(runs_per_prompt)
                 completed_runs = 0
@@ -496,7 +538,7 @@ def main() -> None:
                     )
 
                     for repetition_index in range(1, int(runs_per_prompt) + 1):
-                        file_stub = make_file_stub(batch_label, prompt_obj["id"], repetition_index)
+                        file_stub = make_file_stub(session_id, batch_label, prompt_obj["id"], repetition_index)
                         run_id = file_stub
 
                         payload_path = OUTPUTS_DIR / f"{file_stub}_payload.txt"
@@ -512,7 +554,7 @@ def main() -> None:
                             save_text(payload_path, payload)
                             save_text(micro_prompt_path, prompt_obj["text"])
 
-                            generation = call_anthropic_until_complete(
+                            generation = call_anthropic_with_continuation(
                                 api_key=api_key,
                                 model=model,
                                 payload=payload,
@@ -522,10 +564,12 @@ def main() -> None:
 
                             output_text = generation["text"]
                             save_text(output_path, output_text)
+
                             output_hash = sha256_text(output_text)
 
                             meta = {
                                 "run_id": run_id,
+                                "session_id": session_id,
                                 "timestamp": datetime.now().isoformat(timespec="seconds"),
                                 "batch_label": batch_label,
                                 "prompt_id": prompt_obj["id"],
@@ -548,10 +592,8 @@ def main() -> None:
                                 "input_tokens": generation["input_tokens"],
                                 "output_tokens": generation["output_tokens"],
                                 "output_words": generation["output_words"],
-                                "completion_marker_found": generation["completion_marker_found"],
                                 "truncation_flag": generation["truncation_flag"],
-                                "truncation_reason": generation["truncation_reason"],
-                                "response_ids": generation["response_ids"],
+                                "response_id": generation["response_id"],
                             }
                             save_text(meta_path, json.dumps(meta, indent=2))
 
@@ -559,6 +601,7 @@ def main() -> None:
                                 csv_path,
                                 RunRecord(
                                     run_id=run_id,
+                                    session_id=session_id,
                                     timestamp=meta["timestamp"],
                                     batch_label=batch_label,
                                     prompt_id=prompt_obj["id"],
@@ -582,16 +625,15 @@ def main() -> None:
                                     input_tokens=generation["input_tokens"],
                                     output_tokens=generation["output_tokens"],
                                     output_words=generation["output_words"],
-                                    completion_marker_found=bool(generation["completion_marker_found"]),
                                     truncation_flag=bool(generation["truncation_flag"]),
-                                    truncation_reason=str(generation["truncation_reason"]),
-                                    response_ids=json.dumps(generation["response_ids"]),
                                 ),
                             )
 
+                            st.session_state[CURRENT_SESSION_RUN_IDS_KEY].append(run_id)
+
                             if generation["truncation_flag"]:
                                 warnings.append(
-                                    f"Prompt {prompt_obj['id']} rep {repetition_index}: completion marker not found after {generation['continuation_rounds']} continuation round(s)."
+                                    f"Prompt {prompt_obj['id']} rep {repetition_index}: still hit token ceiling after {generation['continuation_rounds']} continuation round(s)."
                                 )
 
                             successes += 1
@@ -613,17 +655,28 @@ def main() -> None:
     with right:
         st.subheader("Run log")
         df = load_records(csv_path)
+        session_run_ids = list(st.session_state.get(CURRENT_SESSION_RUN_IDS_KEY, []))
+
         if df.empty:
             st.info("No runs logged yet.")
         else:
             display_df = df.copy()
-            for bool_col in ["completion_marker_found", "truncation_flag"]:
-                if bool_col in display_df.columns:
-                    display_df[bool_col] = display_df[bool_col].apply(coerce_bool)
-            st.dataframe(display_df.sort_values("timestamp", ascending=False), use_container_width=True, hide_index=True)
+            if "truncation_flag" in display_df.columns:
+                display_df["truncation_flag"] = display_df["truncation_flag"].apply(coerce_bool)
 
-            selected_run = st.selectbox("Select run", df["run_id"].tolist())
-            current = df[df["run_id"] == selected_run].iloc[0]
+            session_df = display_df[display_df["session_id"].astype(str) == session_id].copy() if "session_id" in display_df.columns else display_df.iloc[0:0].copy()
+            if session_run_ids:
+                session_df = display_df[display_df["run_id"].astype(str).isin(session_run_ids)].copy()
+
+            table_df = session_df if show_current_only else display_df
+            if table_df.empty and show_current_only:
+                st.info("No runs yet in the current app session.")
+            else:
+                st.dataframe(table_df.sort_values("timestamp", ascending=False), use_container_width=True, hide_index=True)
+
+            selectable_df = table_df if not table_df.empty else display_df
+            selected_run = st.selectbox("Select run", selectable_df["run_id"].astype(str).tolist())
+            current = df[df["run_id"].astype(str) == str(selected_run)].iloc[0]
 
             with st.form("score_form"):
                 originality_label = st.text_input(
@@ -675,6 +728,7 @@ def main() -> None:
             st.markdown("### Selected run metadata")
             st.json({
                 "run_id": str(current.get("run_id", "")),
+                "session_id": str(current.get("session_id", "")),
                 "batch_label": str(current.get("batch_label", "")),
                 "prompt_id": int(current.get("prompt_id", 0)),
                 "repetition_index": int(current.get("repetition_index", 0)) if not pd.isna(current.get("repetition_index", 0)) else 0,
@@ -683,18 +737,28 @@ def main() -> None:
                 "stop_reason": str(current.get("stop_reason", "")),
                 "output_words": None if pd.isna(current.get("output_words")) else int(current.get("output_words")),
                 "continuation_rounds": None if pd.isna(current.get("continuation_rounds")) else int(current.get("continuation_rounds")),
-                "completion_marker_found": coerce_bool(current.get("completion_marker_found")),
                 "truncation_flag": coerce_bool(current.get("truncation_flag")),
-                "truncation_reason": str(current.get("truncation_reason", "") or ""),
                 "output_sha256": str(current.get("output_sha256", "")),
             })
 
-            zip_bytes = export_zip(df, OUTPUTS_DIR)
+            history_file_paths = gather_paths_for_records(display_df, ["output_file", "payload_file", "micro_prompt_file", "meta_file"])
+            history_zip_bytes = export_zip(display_df, history_file_paths)
             st.download_button(
-                "Download outputs + CSV",
-                data=zip_bytes,
-                file_name="micro_prompt_runs_export.zip",
+                "Download all history",
+                data=history_zip_bytes,
+                file_name="micro_prompt_runs_export_all.zip",
                 mime="application/zip",
+            )
+
+            current_session_export_df = session_df if not session_df.empty else display_df.iloc[0:0].copy()
+            current_session_file_paths = gather_paths_for_records(current_session_export_df, ["output_file", "payload_file", "micro_prompt_file", "meta_file"])
+            current_session_zip_bytes = export_zip(current_session_export_df, current_session_file_paths)
+            st.download_button(
+                "Download current app session only",
+                data=current_session_zip_bytes,
+                file_name=f"micro_prompt_runs_session_{session_id}.zip",
+                mime="application/zip",
+                disabled=current_session_export_df.empty,
             )
 
 

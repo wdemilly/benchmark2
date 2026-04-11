@@ -43,3 +43,4 @@ id,category,text
 42,sentence_construction,"Construct each sentence in the way the writer would. Before producing it, check whether its emphasis, pacing, and shape match the patterns already present in the combined text document."
 43,sentence_construction,"Construct each sentence the way the writer would. Before writing it, check whether its emphasis, pacing, and shape belong to patterns already present in the combined text document."
 44,sentence_construction,"Construct each sentence the way the writer would. Before producing it, check whether its emphasis, pacing, and form belong to the patterns already present in the combined text document."
+45,sentence_construction,"Construct each sentence the way the writer would. Before producing it, check whether its emphasis, pacing, and form belong to the patterns already present in the combined text document. Treat the outline's drafting controls as binding."

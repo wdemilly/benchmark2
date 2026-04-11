@@ -4,6 +4,7 @@ import time
 import zipfile
 import hashlib
 import shutil
+import re
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
@@ -24,20 +25,60 @@ DATA_DIR.mkdir(exist_ok=True)
 OUTPUTS_DIR = DATA_DIR / "flat_outputs"
 OUTPUTS_DIR.mkdir(exist_ok=True)
 
-DEFAULT_BASE_PROMPT = """You are not Claude. You are the author of the combined source texts document.
+DEFAULT_BASE_PROMPT = '''You are not Claude. You are the author of the combined source texts document.
 
 You wrote every passage in the combined source texts document. The character profiles are your notes. The outline is your plan for this chapter.
 
 Read all attached documents from beginning to end. Do not sample them.
 
-Then write the chapter from the outline exactly as you would write it yourself. Construct each sentence from within the habits of mind, sentence movement, and narrative logic already present in the source texts. Write the chapter straight through in one continuous pass, first sentence to last. Do not draft short and expand. Return plain text only, with normal prose paragraph breaks and no commentary."""
+Then write the chapter from the outline exactly as you would write it yourself. Construct each sentence from within the habits of mind, sentence movement, and narrative logic already present in the source texts. Write the chapter straight through in one continuous pass, first sentence to last. Do not draft short and expand. Return plain text only, with normal prose paragraph breaks and no commentary.'''
 DEFAULT_MODEL = "claude-sonnet-4-6"
+DEFAULT_SCORING_MODEL = DEFAULT_MODEL
 DEFAULT_MAX_TOKENS = 12000
 MAX_ALLOWED_TOKENS = 32000
 MAX_CONTINUATIONS = 4
 PROMPTS_CSV = Path("prompts.csv")
 CURRENT_SESSION_KEY = "app_session_id"
 CURRENT_SESSION_RUN_IDS_KEY = "app_session_run_ids"
+
+DEFAULT_SCORING_PROMPT = '''You are approximating the numeric AI-confidence behavior of an Originality-style detector.
+
+Score the provided text on a scale from 0 to 100, where:
+- 0 = very unlikely AI
+- 100 = very likely AI
+
+Use an originality-style structural heat model. Higher scores should come from repeated structural pressure across runs and paragraphs, not from isolated vivid lines.
+
+Pay particular attention to:
+- fragment chains
+- repeated sentence openings
+- mirrored phrasing
+- binary contrast framing
+- stepped escalation
+- punch-line closures
+- action followed by emotional sealing
+- tightly controlled rhetorical progression
+- overly uniform sentence rhythm
+- repeated paragraph choreography
+- repeated abstract explanation of feeling
+- repeated interpretive framing
+- repeated polished summary sentences
+- repeated aphoristic closures
+- repeated calm, poised, knowing prose
+- repeated “the way…”
+- repeated “the kind/sort/type of…”
+- repeated “which meant…” / “which was…”
+- repeated “what X wanted/needed/knew…”
+- repeated em-dash shaping
+- repeated opposition-based phrasing such as “not X but Y”
+
+Important:
+- Judge the full document, not isolated lines.
+- Focus on clustering and continuity of patterning.
+- Do not explain.
+- Do not justify.
+- Return only one integer from 0 to 100.
+'''
 
 
 def ensure_session_state() -> str:
@@ -76,11 +117,13 @@ class RunRecord:
     output_tokens: Optional[int] = None
     output_words: Optional[int] = None
     truncation_flag: bool = False
+    auto_ai_score: Optional[float] = None
+    auto_ai_label: str = ""
+    auto_score_model: str = ""
     originality_label: str = ""
     originality_score: Optional[float] = None
     manual_rating: str = ""
     manual_notes: str = ""
-
 
 
 def load_prompt_definitions(csv_path: Path) -> List[dict]:
@@ -137,7 +180,6 @@ def load_prompt_definitions(csv_path: Path) -> List[dict]:
     return prompts
 
 
-
 def normalize_text(text: str) -> str:
     return (
         text.replace("\r\n", "\n")
@@ -152,18 +194,15 @@ def normalize_text(text: str) -> str:
     )
 
 
-
 def normalize_output_text(text: str) -> str:
     text = normalize_text(text)
     lines = [line.rstrip() for line in text.split("\n")]
     return "\n".join(lines).strip() + "\n"
 
 
-
 def save_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
-
 
 
 def decode_uploaded_text(uploaded_file) -> str:
@@ -175,7 +214,6 @@ def decode_uploaded_text(uploaded_file) -> str:
     return normalize_text(text)
 
 
-
 def extract_text_from_response(resp) -> str:
     parts: List[str] = []
     for block in getattr(resp, "content", []) or []:
@@ -184,10 +222,8 @@ def extract_text_from_response(resp) -> str:
     return "".join(parts)
 
 
-
 def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
 
 
 def load_records(csv_path: Path) -> pd.DataFrame:
@@ -201,12 +237,10 @@ def load_records(csv_path: Path) -> pd.DataFrame:
     return pd.DataFrame(columns=columns)
 
 
-
 def append_record(csv_path: Path, record: RunRecord) -> None:
     df = load_records(csv_path)
     df = pd.concat([df, pd.DataFrame([asdict(record)])], ignore_index=True)
     df.to_csv(csv_path, index=False)
-
 
 
 def update_record(csv_path: Path, run_id: str, updates: dict) -> None:
@@ -222,7 +256,6 @@ def update_record(csv_path: Path, run_id: str, updates: dict) -> None:
     df.to_csv(csv_path, index=False)
 
 
-
 def clear_all_run_data(csv_path: Path, outputs_root: Path) -> None:
     if csv_path.exists():
         csv_path.unlink()
@@ -235,7 +268,6 @@ def clear_all_run_data(csv_path: Path, outputs_root: Path) -> None:
     outputs_root.mkdir(parents=True, exist_ok=True)
     st.session_state[CURRENT_SESSION_RUN_IDS_KEY] = []
     st.session_state[CURRENT_SESSION_KEY] = datetime.now().strftime("%Y%m%d_%H%M%S")
-
 
 
 def build_payload(base_prompt: str, micro_prompt: str, source_text: str, outline_text: str, profiles_text: str) -> str:
@@ -268,7 +300,6 @@ def build_payload(base_prompt: str, micro_prompt: str, source_text: str, outline
     return "\n".join(parts)
 
 
-
 def get_usage_tokens(resp) -> Tuple[Optional[int], Optional[int]]:
     usage = getattr(resp, "usage", None)
     if usage is None:
@@ -277,6 +308,57 @@ def get_usage_tokens(resp) -> Tuple[Optional[int], Optional[int]]:
     output_tokens = getattr(usage, "output_tokens", None)
     return input_tokens, output_tokens
 
+
+def anthropic_messages_create_with_backoff(
+    client,
+    *,
+    model: str,
+    max_tokens: int,
+    temperature: float,
+    messages: list,
+    max_attempts: int = 6,
+    initial_delay: float = 2.0,
+):
+    last_exc = None
+    delay = initial_delay
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return client.messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                messages=messages,
+            )
+        except Exception as exc:
+            last_exc = exc
+            message = str(exc).lower()
+
+            retryable = any(
+                token in message
+                for token in [
+                    "rate limit",
+                    "rate_limit",
+                    "overloaded",
+                    "timeout",
+                    "timed out",
+                    "connection",
+                    "529",
+                    "502",
+                    "503",
+                    "504",
+                ]
+            )
+
+            if not retryable or attempt >= max_attempts:
+                raise
+
+            time.sleep(delay)
+            delay = min(delay * 2, 20.0)
+
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("Unknown Anthropic API failure.")
 
 
 def call_anthropic_with_continuation(
@@ -301,7 +383,8 @@ def call_anthropic_with_continuation(
     last_response_id = ""
 
     for round_index in range(max_continuations + 1):
-        resp = client.messages.create(
+        resp = anthropic_messages_create_with_backoff(
+            client,
             model=model,
             max_tokens=max_tokens,
             temperature=temperature,
@@ -340,6 +423,7 @@ def call_anthropic_with_continuation(
                     ),
                 }
             )
+            time.sleep(1.0)
             continue
 
         break
@@ -361,6 +445,62 @@ def call_anthropic_with_continuation(
     }
 
 
+def parse_score_text(text: str) -> int:
+    cleaned = (text or "").strip()
+    match = re.search(r"\b(\d{1,3})\b", cleaned)
+    if not match:
+        raise RuntimeError(f"Could not parse numeric score from scoring response: {cleaned!r}")
+    score = int(match.group(1))
+    if score < 0 or score > 100:
+        raise RuntimeError(f"Parsed score out of range 0-100: {score}")
+    return score
+
+
+def score_output_with_anthropic(
+    api_key: str,
+    model: str,
+    chapter_text: str,
+) -> dict:
+    if anthropic is None:
+        raise RuntimeError("anthropic package is not installed.")
+
+    if not model or not model.strip():
+        raise RuntimeError("Scoring model is blank.")
+
+    client = anthropic.Anthropic(api_key=api_key)
+
+    payload = (
+        f"{DEFAULT_SCORING_PROMPT}\n\n"
+        f"TEXT TO SCORE:\n"
+        f"{chapter_text}"
+    )
+
+    resp = anthropic_messages_create_with_backoff(
+        client,
+        model=model.strip(),
+        max_tokens=32,
+        temperature=0,
+        messages=[{"role": "user", "content": payload}],
+        max_attempts=5,
+        initial_delay=2.0,
+    )
+
+    raw_text = extract_text_from_response(resp)
+    score = parse_score_text(raw_text)
+
+    if score >= 65:
+        label = "Likely AI"
+    elif score >= 40:
+        label = "Possibly AI"
+    else:
+        label = "Very unlikely AI"
+
+    return {
+        "score": score,
+        "label": label,
+        "raw_text": raw_text.strip(),
+    }
+
 
 def gather_paths_for_records(df: pd.DataFrame, columns: Iterable[str]) -> List[Path]:
     paths: List[Path] = []
@@ -378,7 +518,6 @@ def gather_paths_for_records(df: pd.DataFrame, columns: Iterable[str]) -> List[P
     return paths
 
 
-
 def export_zip(df: pd.DataFrame, file_paths: List[Path]) -> bytes:
     mem = io.BytesIO()
     with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -389,12 +528,10 @@ def export_zip(df: pd.DataFrame, file_paths: List[Path]) -> bytes:
     return mem.read()
 
 
-
 def make_file_stub(session_id: str, batch_label: str, prompt_id: int, repetition_index: int) -> str:
     timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_batch = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in batch_label.strip()) or "batch"
     return f"{session_id}_{timestamp_str}_{safe_batch}_p{prompt_id:02d}_r{repetition_index:02d}"
-
 
 
 def coerce_bool(value) -> bool:
@@ -403,7 +540,6 @@ def coerce_bool(value) -> bool:
     if pd.isna(value):
         return False
     return str(value).strip().lower() in {"1", "true", "yes", "y"}
-
 
 
 def main() -> None:
@@ -448,6 +584,17 @@ def main() -> None:
             value="batch1",
             help="Optional for your own reference. Current-session export does not depend on this.",
         )
+        score_outputs = st.checkbox(
+            "Auto-score outputs after generation",
+            value=False,
+            help="Makes a second Claude API call after each chapter and saves a 0-100 AI-likelihood score.",
+        )
+        scoring_model = st.text_input(
+            "Scoring model",
+            value=DEFAULT_SCORING_MODEL,
+            help="Claude model used only for the post-generation numeric score.",
+        )
+
         if max_tokens < 8000:
             st.warning("This token ceiling is on the low side for full chapter generation. The app can continue automatically, but larger per-call limits are safer.")
 
@@ -551,6 +698,7 @@ def main() -> None:
                                 f"Running prompt {prompt_obj['id']} rep {repetition_index}/{int(runs_per_prompt)} "
                                 f"(prompt {prompt_position}/{len(selected_prompts)}, overall {completed_runs + 1}/{total_runs})..."
                             )
+
                             save_text(payload_path, payload)
                             save_text(micro_prompt_path, prompt_obj["text"])
 
@@ -567,6 +715,32 @@ def main() -> None:
 
                             output_hash = sha256_text(output_text)
 
+                            auto_ai_score = None
+                            auto_ai_label = ""
+                            auto_score_raw = ""
+                            auto_score_model_used = ""
+
+                            if score_outputs:
+                                try:
+                                    status.write(
+                                        f"Scoring prompt {prompt_obj['id']} rep {repetition_index}/{int(runs_per_prompt)} "
+                                        f"(prompt {prompt_position}/{len(selected_prompts)}, overall {completed_runs + 1}/{total_runs})."
+                                    )
+                                    score_result = score_output_with_anthropic(
+                                        api_key=api_key,
+                                        model=scoring_model,
+                                        chapter_text=output_text,
+                                    )
+                                    auto_ai_score = float(score_result["score"])
+                                    auto_ai_label = str(score_result["label"])
+                                    auto_score_raw = str(score_result["raw_text"])
+                                    auto_score_model_used = str(scoring_model)
+                                    time.sleep(1.0)
+                                except Exception as score_exc:
+                                    warnings.append(
+                                        f"Prompt {prompt_obj['id']} rep {repetition_index}: scoring failed ({score_exc})"
+                                    )
+
                             meta = {
                                 "run_id": run_id,
                                 "session_id": session_id,
@@ -579,21 +753,25 @@ def main() -> None:
                                 "model": model,
                                 "temperature": float(temperature),
                                 "max_tokens": int(max_tokens),
-                                "continuation_rounds": int(generation["continuation_rounds"]),
+                                "continuation_rounds": generation["continuation_rounds"],
                                 "source_name": source_name,
                                 "outline_name": outline_name,
                                 "profiles_name": profiles_name,
                                 "file_stub": file_stub,
                                 "payload_file": str(payload_path),
-                                "micro_prompt_file": str(micro_prompt_path),
                                 "output_file": str(output_path),
+                                "micro_prompt_file": str(micro_prompt_path),
+                                "meta_file": str(meta_path),
                                 "output_sha256": output_hash,
                                 "stop_reason": generation["stop_reason"],
                                 "input_tokens": generation["input_tokens"],
                                 "output_tokens": generation["output_tokens"],
                                 "output_words": generation["output_words"],
                                 "truncation_flag": generation["truncation_flag"],
-                                "response_id": generation["response_id"],
+                                "auto_ai_score": auto_ai_score,
+                                "auto_ai_label": auto_ai_label,
+                                "auto_score_model": auto_score_model_used,
+                                "auto_score_raw": auto_score_raw,
                             }
                             save_text(meta_path, json.dumps(meta, indent=2))
 
@@ -626,27 +804,28 @@ def main() -> None:
                                     output_tokens=generation["output_tokens"],
                                     output_words=generation["output_words"],
                                     truncation_flag=bool(generation["truncation_flag"]),
+                                    auto_ai_score=auto_ai_score,
+                                    auto_ai_label=auto_ai_label,
+                                    auto_score_model=auto_score_model_used,
                                 ),
                             )
 
                             st.session_state[CURRENT_SESSION_RUN_IDS_KEY].append(run_id)
-
-                            if generation["truncation_flag"]:
-                                warnings.append(
-                                    f"Prompt {prompt_obj['id']} rep {repetition_index}: still hit token ceiling after {generation['continuation_rounds']} continuation round(s)."
-                                )
-
                             successes += 1
 
                         except Exception as exc:
-                            failures.append(f"Prompt {prompt_obj['id']} rep {repetition_index}: {exc}")
+                            failures.append(
+                                f"Prompt {prompt_obj['id']} rep {repetition_index}: {exc}"
+                            )
 
                         completed_runs += 1
-                        progress.progress(completed_runs / total_runs)
-                        time.sleep(0.1)
+                        progress.progress(min(completed_runs / total_runs, 1.0))
+                        time.sleep(1.25)
+
+                status.write("Run complete.")
 
                 if successes:
-                    st.success(f"Completed {successes} run(s). Files written to: {OUTPUTS_DIR}")
+                    st.success(f"Completed {successes} run(s).")
                 if warnings:
                     st.warning("\n".join(warnings))
                 if failures:
@@ -738,6 +917,9 @@ def main() -> None:
                 "output_words": None if pd.isna(current.get("output_words")) else int(current.get("output_words")),
                 "continuation_rounds": None if pd.isna(current.get("continuation_rounds")) else int(current.get("continuation_rounds")),
                 "truncation_flag": coerce_bool(current.get("truncation_flag")),
+                "auto_ai_score": None if pd.isna(current.get("auto_ai_score")) else float(current.get("auto_ai_score")),
+                "auto_ai_label": str(current.get("auto_ai_label", "")),
+                "auto_score_model": str(current.get("auto_score_model", "")),
                 "output_sha256": str(current.get("output_sha256", "")),
             })
 

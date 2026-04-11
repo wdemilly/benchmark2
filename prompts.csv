@@ -1,33 +1,13 @@
-id,category,text
-1,identity_lock,You are the author of the combined source texts document. You wrote every passage in it.
-2,identity_lock,You are not Claude. You are the author of the combined source texts document.
-3,identity_lock,Write this chapter as the author of the combined source texts document would write it.
-4,identity_lock,You wrote the combined source texts document. Continue that writing from the outline.
-5,identity_lock,Treat the combined source texts document as your own prior work and the outline as your plan for the next chapter.
-6,sentence_construction,"Construct each sentence in the way the writer would. Before producing it, check whether it matches the sentence movement and prose logic found in the combined text document."
-7,sentence_construction,"Construct each sentence in the way the writer would. Make each sentence answer to the habits of movement, emphasis, and phrasing already present in the combined text document."
-8,sentence_construction,"Construct each sentence in the way the writer would, using the same kind of sentence movement and unfolding of thought found in the combined text document."
-9,sentence_construction,Construct each sentence in the way the writer would. Do not settle for approximate tone; match the writer's actual sentence habits from the combined text document.
-10,sentence_construction,"Construct each sentence in the way the writer would. Let each sentence follow the writer's prose logic, not a generalized imitation of style."
-11,sentence_construction,"Construct each sentence in the way the writer would. Before producing it, check whether its emphasis, pacing, and shape belong to the patterns already present in the combined text document."
-12,sentence_construction,"Construct each sentence in the way the writer would. Keep each sentence inside the writer's own habits of phrasing, pressure, and release as they appear in the combined text document."
-13,sentence_construction,"Construct each sentence in the way the writer would. Match not just the tone, but the writer's actual way of building thought from one phrase to the next."
-14,sentence_construction,"Construct each sentence in the way the writer would. Before producing it, check whether it could sit naturally among the sentences in the combined text document without drawing attention to itself."
-15,sentence_construction,"Construct each sentence in the way the writer would. Build each sentence from the writer's own pattern of emphasis and progression, as shown in the combined text document."
-16,anti_explanatory,Do not shift into explanatory prose.
-17,anti_explanatory,Do not summarize the meaning of events.
-18,anti_explanatory,Do not generalize beyond the immediate scene.
-19,anti_explanatory,Do not produce thematic or interpretive closure.
-20,anti_explanatory,Do not smooth transitions for elegance if the writer's own prose would not do so.
-21,process_control,Write the chapter in one continuous pass from first sentence to last.
-22,process_control,Do not draft short and expand.
-23,process_control,Move from beat to beat without summarizing between them.
-24,process_control,Do not pause to explain what the scene means; keep writing the scene itself.
-25,process_control,Write straight through from the opening sentence to the final sentence without stepping outside the chapter.
-26,positive_grounding,"Let handling, interruption, and task carry the scene."
-27,positive_grounding,Keep the prose inside practical observation and response.
-28,positive_grounding,"Let action, speech, and local thought carry meaning without explanation."
-29,positive_grounding,Favor local physical business over interpretive phrasing.
-30,positive_grounding,"Keep meaning embedded in action, speech, and routine rather than stated directly."
-31,sentence_construction,"Construct each sentence in the way the writer would. Before producing it, check whether its movement, emphasis, pacing, and shape belong to the patterns already present in the combined text document, and build the thought from one phrase to the next the way the writer does there."
-32,sentence_construction,"Construct each sentence in the way the writer would. Before producing it, check whether its movement, pacing, and shape belong to the patterns already present in the combined text document."
+label,source_prompt_id,variant_type,category,text
+14a,14,original,sentence_construction,"Construct each sentence in the way the writer would. Before producing it, check whether it could sit naturally among the sentences in the combined text document without drawing attention to itself."
+14b,14,subtle_variation,sentence_construction,"Construct each sentence in the way the writer would. Before producing it, check whether it would sit naturally among the sentences in the combined text document without drawing attention to itself."
+14c,14,subtle_variation,sentence_construction,"Construct each sentence the way the writer would. Before writing it, check whether it could sit naturally among the sentences in the combined text document without standing out."
+14d,14,subtle_variation,sentence_construction,"Construct each sentence the way the writer would. Before producing it, check whether it belongs naturally among the sentences in the combined text document rather than calling attention to itself."
+26a,26,original,positive_grounding,"Let handling, interruption, and task carry the scene."
+26b,26,subtle_variation,positive_grounding,"Let action, interruption, and task carry the scene."
+26c,26,subtle_variation,positive_grounding,"Let physical handling, interruption, and task carry the scene."
+26d,26,subtle_variation,positive_grounding,"Let handling, interruption, and immediate task carry the scene."
+11a,11,original,sentence_construction,"Construct each sentence in the way the writer would. Before producing it, check whether its emphasis, pacing, and shape belong to the patterns already present in the combined text document."
+11b,11,subtle_variation,sentence_construction,"Construct each sentence in the way the writer would. Before producing it, check whether its emphasis, pacing, and shape match the patterns already present in the combined text document."
+11c,11,subtle_variation,sentence_construction,"Construct each sentence the way the writer would. Before writing it, check whether its emphasis, pacing, and shape belong to patterns already present in the combined text document."
+11d,11,subtle_variation,sentence_construction,"Construct each sentence the way the writer would. Before producing it, check whether its emphasis, pacing, and form belong to the patterns already present in the combined text document."

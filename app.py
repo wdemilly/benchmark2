@@ -65,7 +65,19 @@ Judge on these criteria, in roughly this order of importance:
 
 5. SENTENCE CRAFT. Reward verbs that do work without adverbial propping; concrete nouns over abstract ones; rhythm that enacts rather than decorates; restraint from aphoristic or summary sentences; appropriate withholding.
 
-You will receive the drafts labeled DRAFT 1, DRAFT 2, etc. After reading all of them, return ONLY a single integer: the number of the winning draft. No explanation, no preamble, no commentary. Just the number.
+You will receive the drafts labeled DRAFT 1, DRAFT 2, etc. Read every draft in full before beginning your analysis.
+
+Then produce your evaluation in this exact format:
+
+First, for each draft, write a short paragraph (3-6 sentences) assessing it against the criteria above. Quote specific sentences when flagging failures or praising successes. Do not be diplomatic — the weaker drafts should be identified as weaker and why.
+
+Then write a comparison paragraph that names the two or three closest contenders and the specific reasons one edges out the others.
+
+Then, on the final line of your response, write exactly:
+
+WINNER: N
+
+where N is the number of the winning draft. Nothing after that line. The word WINNER must appear in all caps followed by a colon and the integer.
 '''
 
 
@@ -510,13 +522,22 @@ def parse_winner_integer(text: str, max_valid: int) -> Tuple[Optional[int], str]
     if not cleaned:
         return None, "failed"
 
+    # Preferred: explicit 'WINNER: N' declaration (case-insensitive; last one wins)
+    winner_matches = list(re.finditer(r"WINNER\s*[:\-]\s*(\d+)", cleaned, re.IGNORECASE))
+    if winner_matches:
+        value = int(winner_matches[-1].group(1))
+        if 1 <= value <= max_valid:
+            return value, "clean"
+
     if re.fullmatch(r"\d+[.\s]*", cleaned):
         value = int(re.search(r"\d+", cleaned).group(0))
         if 1 <= value <= max_valid:
             return value, "clean"
         return None, "failed"
 
-    for match in re.finditer(r"\b(\d+)\b", cleaned):
+    # Last-resort: the final integer in the response, if in valid range
+    all_ints = list(re.finditer(r"\b(\d+)\b", cleaned))
+    for match in reversed(all_ints):
         value = int(match.group(1))
         if 1 <= value <= max_valid:
             return value, "parsed"
@@ -549,10 +570,32 @@ def evaluate_drafts_with_anthropic(
         + "\n\n---\n\n".join(draft_blocks)
     )
 
+    # Pre-flight size check. Claude Opus 4.6 has a 200k-token context window.
+    # Reserve 8k tokens for the response and per-message overhead.
+    # Rough char-to-token ratio for English prose is ~4 chars per token; we use 3.5
+    # to be conservative (overestimate tokens so we warn earlier rather than later).
+    CONTEXT_WINDOW_TOKENS = 200_000
+    RESPONSE_RESERVE_TOKENS = 8_000
+    INPUT_BUDGET_TOKENS = CONTEXT_WINDOW_TOKENS - RESPONSE_RESERVE_TOKENS
+
+    estimated_input_tokens = int(len(payload) / 3.5)
+    if estimated_input_tokens > INPUT_BUDGET_TOKENS:
+        total_words = sum(len(t.split()) for _, t in drafts)
+        avg_words = total_words // max(len(drafts), 1)
+        raise RuntimeError(
+            f"Evaluator input is too large for the model's context window. "
+            f"Estimated {estimated_input_tokens:,} input tokens "
+            f"(budget is {INPUT_BUDGET_TOKENS:,} after reserving "
+            f"{RESPONSE_RESERVE_TOKENS:,} for the response). "
+            f"Batch has {len(drafts)} drafts totaling {total_words:,} words "
+            f"(avg {avg_words:,} words/draft). "
+            f"Evaluate fewer drafts at once or shorten the inputs."
+        )
+
     resp = anthropic_messages_create_with_backoff(
         client,
         model=model.strip(),
-        max_tokens=64,
+        max_tokens=4000,
         temperature=0,
         messages=[{"role": "user", "content": payload}],
         max_attempts=5,

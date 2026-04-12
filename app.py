@@ -630,20 +630,49 @@ def main() -> None:
         provider = st.selectbox("Provider", ["anthropic"], index=0)
         model = st.text_input("Model", value=DEFAULT_MODEL)
 
+        import os
+        import re
+
+        def clean_api_key(value: str) -> str:
+            if not value:
+                return ""
+            return re.sub(r"\s+", "", str(value)).strip()
+
         api_key = ""
+        api_key_source = ""
+
         try:
             if "ANTHROPIC_API_KEY" in st.secrets:
-                api_key = str(st.secrets["ANTHROPIC_API_KEY"] or "").strip()
+                api_key = clean_api_key(st.secrets["ANTHROPIC_API_KEY"])
+                if api_key:
+                    api_key_source = "Streamlit secrets"
         except Exception:
             api_key = ""
+            api_key_source = ""
+
         if not api_key:
-            import os
-            api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+            api_key = clean_api_key(os.environ.get("ANTHROPIC_API_KEY", ""))
+            if api_key:
+                api_key_source = "environment variable"
+
+        if not api_key:
+            manual_key = st.text_input(
+                "Anthropic API key",
+                value="",
+                type="password",
+                help="Used only for this session if not found in Streamlit secrets or the environment.",
+            )
+            api_key = clean_api_key(manual_key)
+            if api_key:
+                api_key_source = "manual entry"
 
         if api_key:
-            st.caption("API key: loaded from secrets")
+            st.caption(f"API key loaded from {api_key_source}.")
         else:
-            st.error("API key not found. Set ANTHROPIC_API_KEY in Streamlit secrets or the environment.")
+            st.error(
+                "API key not found. Set ANTHROPIC_API_KEY in Streamlit secrets, "
+                "the environment, or enter it manually here."
+            )
 
         temperature = st.slider("Temperature", 0.0, 1.5, 1.0, 0.1)
         max_tokens = st.number_input(

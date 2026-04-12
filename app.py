@@ -5,6 +5,7 @@ import zipfile
 import hashlib
 import shutil
 import re
+import os
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
@@ -219,18 +220,84 @@ def sha256_text(text: str) -> str:
 
 def load_records(csv_path: Path) -> pd.DataFrame:
     columns = [field for field in RunRecord.__dataclass_fields__.keys()]
+
+    text_columns = [
+        "run_id",
+        "session_id",
+        "timestamp",
+        "batch_label",
+        "category",
+        "provider",
+        "model",
+        "source_name",
+        "outline_name",
+        "profiles_name",
+        "file_stub",
+        "output_file",
+        "payload_file",
+        "micro_prompt_file",
+        "meta_file",
+        "output_sha256",
+        "stop_reason",
+        "evaluation_id",
+        "evaluation_raw",
+        "evaluation_parse_status",
+        "evaluator_model",
+        "originality_label",
+        "manual_rating",
+        "manual_notes",
+    ]
+
+    bool_columns = [
+        "truncation_flag",
+        "is_winner",
+    ]
+
+    numeric_columns = [
+        "prompt_id",
+        "repetition_index",
+        "temperature",
+        "max_tokens",
+        "continuation_rounds",
+        "input_tokens",
+        "output_tokens",
+        "output_words",
+        "originality_score",
+    ]
+
     if csv_path.exists():
         df = pd.read_csv(csv_path)
+
         for col in columns:
             if col not in df.columns:
                 df[col] = pd.NA
+
+        for col in text_columns:
+            if col in df.columns:
+                df[col] = df[col].astype("object")
+
+        for col in bool_columns:
+            if col in df.columns:
+                df[col] = df[col].astype("object")
+
+        for col in numeric_columns:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+
         return df[columns]
+
     return pd.DataFrame(columns=columns)
 
 
 def append_record(csv_path: Path, record: RunRecord) -> None:
     df = load_records(csv_path)
-    df = pd.concat([df, pd.DataFrame([asdict(record)])], ignore_index=True)
+    new_row = pd.DataFrame([asdict(record)])
+
+    for col in df.columns:
+        if col in new_row.columns and df[col].dtype == object:
+            new_row[col] = new_row[col].astype("object")
+
+    df = pd.concat([df, new_row], ignore_index=True)
     df.to_csv(csv_path, index=False)
 
 
@@ -238,11 +305,13 @@ def update_record(csv_path: Path, run_id: str, updates: dict) -> None:
     df = load_records(csv_path)
     if df.empty:
         return
-    mask = df["run_id"] == run_id
+    mask = df["run_id"].astype(str) == str(run_id)
     if not mask.any():
         return
     for key, value in updates.items():
         if key in df.columns:
+            if isinstance(value, str):
+                df[key] = df[key].astype("object")
             df.loc[mask, key] = value
     df.to_csv(csv_path, index=False)
 
@@ -437,21 +506,16 @@ def call_anthropic_with_continuation(
 
 
 def parse_winner_integer(text: str, max_valid: int) -> Tuple[Optional[int], str]:
-    """Parse the first integer in the response. Returns (winner_index, parse_status).
-    parse_status is 'clean' if the response was just an integer, 'parsed' if extracted
-    from longer text, or 'failed' if no valid integer was found."""
     cleaned = (text or "").strip()
     if not cleaned:
         return None, "failed"
 
-    # Clean response: just an integer (possibly with trailing punctuation/whitespace)
     if re.fullmatch(r"\d+[.\s]*", cleaned):
         value = int(re.search(r"\d+", cleaned).group(0))
         if 1 <= value <= max_valid:
             return value, "clean"
         return None, "failed"
 
-    # Parsed response: extract first integer in range
     for match in re.finditer(r"\b(\d+)\b", cleaned):
         value = int(match.group(1))
         if 1 <= value <= max_valid:
@@ -465,9 +529,6 @@ def evaluate_drafts_with_anthropic(
     model: str,
     drafts: List[Tuple[str, str]],
 ) -> dict:
-    """Send N drafts to Opus for literary evaluation. drafts is a list of
-    (run_id, text) tuples. Returns dict with winner_run_id, winner_index,
-    raw_text, parse_status, model."""
     if anthropic is None:
         raise RuntimeError("anthropic package is not installed.")
 
@@ -548,9 +609,6 @@ def make_file_stub(session_id: str, batch_label: str, prompt_id: int, repetition
 
 
 def short_model_slug(model: str) -> str:
-    """Return a compact model designator for filenames: e.g. 'O4.6' for claude-opus-4-6,
-    'S4.6' for claude-sonnet-4-6, 'H4.5' for claude-haiku-4-5. Falls back to the raw name
-    for anything unrecognized."""
     if not model:
         return "model"
     name = model.strip().lower()
@@ -567,11 +625,9 @@ def short_model_slug(model: str) -> str:
     if prefix is None:
         safe = "".join(ch for ch in model if ch.isalnum() or ch in "-._")
         return safe or "model"
-    # Extract first "N-M" or "N.M" number sequence after the family name
     match = re.search(r"(\d+)[-.](\d+)", name)
     if match:
         return f"{prefix}{match.group(1)}.{match.group(2)}"
-    # Fall back to first single number
     match = re.search(r"\d+", name)
     if match:
         return f"{prefix}{match.group(0)}"
@@ -579,9 +635,7 @@ def short_model_slug(model: str) -> str:
 
 
 def make_winner_filename(prompt_id: int, temperature: float, model: str) -> str:
-    """Build the winner filename per Walter's spec: 'P{id} T{temp} {model-slug} Winner.txt'."""
     temp_str = f"{temperature:.1f}".lstrip("0") if temperature < 1 else f"{temperature:.1f}"
-    # "0.8" -> ".8"; "1.0" -> "1.0"
     safe_temp = temp_str if temp_str.startswith(".") or temp_str.startswith("-") else temp_str
     slug = short_model_slug(model)
     timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -589,7 +643,6 @@ def make_winner_filename(prompt_id: int, temperature: float, model: str) -> str:
 
 
 def update_records_bulk(csv_path: Path, run_ids: List[str], updates: dict) -> None:
-    """Apply the same updates dict to every run_id in the list, in one pass."""
     df = load_records(csv_path)
     if df.empty or not run_ids:
         return
@@ -598,6 +651,8 @@ def update_records_bulk(csv_path: Path, run_ids: List[str], updates: dict) -> No
         return
     for key, value in updates.items():
         if key in df.columns:
+            if isinstance(value, str):
+                df[key] = df[key].astype("object")
             df.loc[mask, key] = value
     df.to_csv(csv_path, index=False)
 
@@ -608,6 +663,12 @@ def coerce_bool(value) -> bool:
     if pd.isna(value):
         return False
     return str(value).strip().lower() in {"1", "true", "yes", "y"}
+
+
+def clean_api_key(value: str) -> str:
+    if not value:
+        return ""
+    return re.sub(r"\s+", "", str(value)).strip()
 
 
 def main() -> None:
@@ -629,14 +690,6 @@ def main() -> None:
         st.caption(f"Current app session: {session_id}")
         provider = st.selectbox("Provider", ["anthropic"], index=0)
         model = st.text_input("Model", value=DEFAULT_MODEL)
-
-        import os
-        import re
-
-        def clean_api_key(value: str) -> str:
-            if not value:
-                return ""
-            return re.sub(r"\s+", "", str(value)).strip()
 
         api_key = ""
         api_key_source = ""
@@ -796,8 +849,16 @@ def main() -> None:
                         file_stub = make_file_stub(session_id, batch_label, prompt_obj["id"], repetition_index)
                         run_id = file_stub
 
+                        output_slug = short_model_slug(model)
+                        output_temp_str = f"{float(temperature):.1f}"
+                        output_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        output_filename = (
+                            f"P{prompt_obj['id']} T{output_temp_str} {output_slug} "
+                            f"R{repetition_index:02d} {output_ts}.txt"
+                        )
+
                         payload_path = OUTPUTS_DIR / f"{file_stub}_payload.txt"
-                        output_path = OUTPUTS_DIR / f"{file_stub}_output.txt"
+                        output_path = OUTPUTS_DIR / output_filename
                         micro_prompt_path = OUTPUTS_DIR / f"{file_stub}_prompt.txt"
                         meta_path = OUTPUTS_DIR / f"{file_stub}_meta.json"
 
@@ -910,95 +971,6 @@ def main() -> None:
     with right:
         st.subheader("Run log")
 
-        latest_batch_ids = list(st.session_state.get(LATEST_BATCH_RUN_IDS_KEY, []))
-        batch_count = len(latest_batch_ids)
-        evaluate_clicked = st.button(
-            f"Evaluate latest batch ({batch_count} draft{'s' if batch_count != 1 else ''})",
-            disabled=batch_count < 2,
-            help="Send all drafts from the most recent 'Run selected prompts' click to the evaluator. Opus picks the strongest on literary grounds.",
-        )
-
-        if evaluate_clicked:
-            if not api_key:
-                st.error("Enter an API key in the sidebar.")
-            else:
-                eval_df = load_records(csv_path)
-                batch_rows = eval_df[eval_df["run_id"].astype(str).isin([str(r) for r in latest_batch_ids])].copy()
-
-                if len(batch_rows) < 2:
-                    st.error("Need at least 2 drafts in the latest batch to evaluate.")
-                else:
-                    drafts: List[Tuple[str, str]] = []
-                    missing: List[str] = []
-                    for _, row in batch_rows.iterrows():
-                        run_id_val = str(row["run_id"])
-                        output_file_val = str(row.get("output_file", "") or "")
-                        if output_file_val and Path(output_file_val).exists():
-                            draft_text = Path(output_file_val).read_text(encoding="utf-8")
-                            drafts.append((run_id_val, draft_text))
-                        else:
-                            missing.append(run_id_val)
-
-                    if missing:
-                        st.warning(f"Skipping {len(missing)} run(s) with missing output files: {', '.join(missing)}")
-
-                    if len(drafts) < 2:
-                        st.error("Fewer than 2 drafts have readable output files. Cannot evaluate.")
-                    else:
-                        with st.spinner(f"Evaluating {len(drafts)} drafts with {evaluator_model}..."):
-                            try:
-                                result = evaluate_drafts_with_anthropic(
-                                    api_key=api_key,
-                                    model=evaluator_model,
-                                    drafts=drafts,
-                                )
-
-                                winner_run_id = result["winner_run_id"]
-                                winner_row = batch_rows[batch_rows["run_id"].astype(str) == str(winner_run_id)].iloc[0]
-                                winner_prompt_id = int(winner_row["prompt_id"])
-                                winner_temperature = float(winner_row["temperature"])
-                                winner_model = str(winner_row["model"])
-                                winner_output_file = str(winner_row["output_file"])
-
-                                winner_text = Path(winner_output_file).read_text(encoding="utf-8")
-                                winner_filename = make_winner_filename(
-                                    prompt_id=winner_prompt_id,
-                                    temperature=winner_temperature,
-                                    model=winner_model,
-                                )
-                                winner_path = OUTPUTS_DIR / winner_filename
-                                save_text(winner_path, winner_text)
-
-                                evaluation_id = f"eval_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-
-                                batch_run_id_list = [str(r) for r in batch_rows["run_id"].astype(str).tolist()]
-                                update_records_bulk(
-                                    csv_path,
-                                    batch_run_id_list,
-                                    {
-                                        "is_winner": False,
-                                        "evaluation_id": evaluation_id,
-                                        "evaluator_model": result["model"],
-                                        "evaluation_parse_status": result["parse_status"],
-                                        "evaluation_raw": result["raw_text"],
-                                    },
-                                )
-                                update_record(
-                                    csv_path,
-                                    str(winner_run_id),
-                                    {"is_winner": True},
-                                )
-
-                                st.success(
-                                    f"Winner: {winner_run_id} (draft {result['winner_index']} of {len(drafts)}). "
-                                    f"Parse: {result['parse_status']}. Saved to {winner_filename}."
-                                )
-                                if result["parse_status"] != "clean":
-                                    st.info(f"Raw evaluator response: {result['raw_text']!r}")
-
-                            except Exception as eval_exc:
-                                st.error(f"Evaluation failed: {eval_exc}")
-
         df = load_records(csv_path)
         session_run_ids = list(st.session_state.get(CURRENT_SESSION_RUN_IDS_KEY, []))
 
@@ -1093,6 +1065,97 @@ def main() -> None:
 
             history_file_paths = gather_paths_for_records(display_df, ["output_file", "payload_file", "micro_prompt_file", "meta_file"])
             history_zip_bytes = export_zip(display_df, history_file_paths)
+
+            latest_batch_ids = list(st.session_state.get(LATEST_BATCH_RUN_IDS_KEY, []))
+            batch_count = len(latest_batch_ids)
+            evaluate_clicked = st.button(
+                f"Evaluate latest batch ({batch_count} draft{'s' if batch_count != 1 else ''})",
+                disabled=batch_count < 2,
+                help="Send all drafts from the most recent 'Run selected prompts' click to the evaluator. Opus picks the strongest on literary grounds.",
+            )
+
+            if evaluate_clicked:
+                if not api_key:
+                    st.error("Enter an API key in the sidebar.")
+                else:
+                    eval_df = load_records(csv_path)
+                    batch_rows = eval_df[eval_df["run_id"].astype(str).isin([str(r) for r in latest_batch_ids])].copy()
+
+                    if len(batch_rows) < 2:
+                        st.error("Need at least 2 drafts in the latest batch to evaluate.")
+                    else:
+                        drafts: List[Tuple[str, str]] = []
+                        missing: List[str] = []
+                        for _, row in batch_rows.iterrows():
+                            run_id_val = str(row["run_id"])
+                            output_file_val = str(row.get("output_file", "") or "")
+                            if output_file_val and Path(output_file_val).exists():
+                                draft_text = Path(output_file_val).read_text(encoding="utf-8")
+                                drafts.append((run_id_val, draft_text))
+                            else:
+                                missing.append(run_id_val)
+
+                        if missing:
+                            st.warning(f"Skipping {len(missing)} run(s) with missing output files: {', '.join(missing)}")
+
+                        if len(drafts) < 2:
+                            st.error("Fewer than 2 drafts have readable output files. Cannot evaluate.")
+                        else:
+                            with st.spinner(f"Evaluating {len(drafts)} drafts with {evaluator_model}..."):
+                                try:
+                                    result = evaluate_drafts_with_anthropic(
+                                        api_key=api_key,
+                                        model=evaluator_model,
+                                        drafts=drafts,
+                                    )
+
+                                    winner_run_id = result["winner_run_id"]
+                                    winner_row = batch_rows[batch_rows["run_id"].astype(str) == str(winner_run_id)].iloc[0]
+                                    winner_prompt_id = int(winner_row["prompt_id"])
+                                    winner_temperature = float(winner_row["temperature"])
+                                    winner_model = str(winner_row["model"])
+                                    winner_output_file = str(winner_row["output_file"])
+
+                                    winner_text = Path(winner_output_file).read_text(encoding="utf-8")
+                                    winner_filename = make_winner_filename(
+                                        prompt_id=winner_prompt_id,
+                                        temperature=winner_temperature,
+                                        model=winner_model,
+                                    )
+                                    winner_path = OUTPUTS_DIR / winner_filename
+                                    save_text(winner_path, winner_text)
+
+                                    evaluation_id = f"eval_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+                                    batch_run_id_list = [str(r) for r in batch_rows["run_id"].astype(str).tolist()]
+                                    update_records_bulk(
+                                        csv_path,
+                                        batch_run_id_list,
+                                        {
+                                            "is_winner": False,
+                                            "evaluation_id": evaluation_id,
+                                            "evaluator_model": result["model"],
+                                            "evaluation_parse_status": result["parse_status"],
+                                            "evaluation_raw": result["raw_text"],
+                                        },
+                                    )
+                                    update_record(
+                                        csv_path,
+                                        str(winner_run_id),
+                                        {"is_winner": True},
+                                    )
+
+                                    st.success(
+                                        f"Winner: {winner_run_id} (draft {result['winner_index']} of {len(drafts)}). "
+                                        f"Parse: {result['parse_status']}. Saved to {winner_filename}."
+                                    )
+                                    if result["parse_status"] != "clean":
+                                        st.info(f"Raw evaluator response: {result['raw_text']!r}")
+                                    st.rerun()
+
+                                except Exception as eval_exc:
+                                    st.error(f"Evaluation failed: {eval_exc}")
+
             st.download_button(
                 "Download all history",
                 data=history_zip_bytes,

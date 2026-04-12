@@ -629,7 +629,21 @@ def main() -> None:
         st.caption(f"Current app session: {session_id}")
         provider = st.selectbox("Provider", ["anthropic"], index=0)
         model = st.text_input("Model", value=DEFAULT_MODEL)
-        api_key = st.text_input("API key", value="", type="password")
+
+        api_key = ""
+        try:
+            api_key = str(st.secrets.get("ANTHROPIC_API_KEY", "") or "").strip()
+        except Exception:
+            api_key = ""
+        if not api_key:
+            import os
+            api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+
+        if api_key:
+            st.caption("API key: loaded from secrets")
+        else:
+            st.error("API key not found. Set ANTHROPIC_API_KEY in Streamlit secrets or the environment.")
+
         temperature = st.slider("Temperature", 0.0, 1.5, 1.0, 0.1)
         max_tokens = st.number_input(
             "Max output tokens per API call",

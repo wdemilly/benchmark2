@@ -73,11 +73,17 @@ First, for each draft, write a short paragraph (3-6 sentences) assessing it agai
 
 Then write a comparison paragraph that names the two or three closest contenders and the specific reasons one edges out the others.
 
+Then, on a line by itself, write exactly:
+
+RANKING: N, N, N, ...
+
+where the numbers are every draft number in order from strongest to weakest, separated by commas. Include every draft exactly once.
+
 Then, on the final line of your response, write exactly:
 
 WINNER: N
 
-where N is the number of the winning draft. Nothing after that line. The word WINNER must appear in all caps followed by a colon and the integer.
+where N is the number of the winning draft (the first number in the ranking). Nothing after that line. The words RANKING and WINNER must appear in all caps followed by a colon.
 '''
 
 
@@ -121,6 +127,7 @@ class RunRecord:
     truncation_flag: bool = False
     evaluation_id: str = ""
     is_winner: bool = False
+    evaluation_rank: Optional[int] = None
     evaluation_raw: str = ""
     evaluation_parse_status: str = ""
     evaluator_model: str = ""
@@ -275,6 +282,7 @@ def load_records(csv_path: Path) -> pd.DataFrame:
         "output_tokens",
         "output_words",
         "originality_score",
+        "evaluation_rank",
     ]
 
     if csv_path.exists():
@@ -545,6 +553,38 @@ def parse_winner_integer(text: str, max_valid: int) -> Tuple[Optional[int], str]
     return None, "failed"
 
 
+def parse_ranking_list(text: str, max_valid: int) -> List[int]:
+    """Parse a 'RANKING: N, N, N' line into an ordered list of draft indices.
+    Returns the best-to-worst ranking with duplicates removed in order. Any
+    missing drafts are appended at the end in ascending order so the list is
+    always a permutation of 1..max_valid. Returns [] if no ranking line is found."""
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return []
+
+    match = re.search(r"RANKING\s*[:\-]\s*([0-9,\s]+)", cleaned, re.IGNORECASE)
+    if not match:
+        return []
+
+    raw_list = match.group(1)
+    found: List[int] = []
+    seen = set()
+    for num_str in re.findall(r"\d+", raw_list):
+        value = int(num_str)
+        if 1 <= value <= max_valid and value not in seen:
+            found.append(value)
+            seen.add(value)
+
+    if not found:
+        return []
+
+    for i in range(1, max_valid + 1):
+        if i not in seen:
+            found.append(i)
+
+    return found
+
+
 def evaluate_drafts_with_anthropic(
     api_key: str,
     model: str,
@@ -609,10 +649,12 @@ def evaluate_drafts_with_anthropic(
         raise RuntimeError(f"Could not parse a valid draft number from evaluator response: {raw_text!r}")
 
     winner_run_id = drafts[winner_index - 1][0]
+    ranking_list = parse_ranking_list(raw_text, max_valid=len(drafts))
 
     return {
         "winner_run_id": winner_run_id,
         "winner_index": winner_index,
+        "ranking": ranking_list,
         "raw_text": raw_text.strip(),
         "parse_status": parse_status,
         "model": model.strip(),
@@ -1032,7 +1074,22 @@ def main() -> None:
             if table_df.empty and show_current_only:
                 st.info("No runs yet in the current app session.")
             else:
-                st.dataframe(table_df.sort_values("timestamp", ascending=False), use_container_width=True, hide_index=True)
+                sorted_table = table_df.sort_values("timestamp", ascending=False).copy()
+                if "evaluation_rank" in sorted_table.columns:
+                    sorted_table.insert(
+                        0,
+                        "rank",
+                        sorted_table["evaluation_rank"].apply(
+                            lambda v: "" if pd.isna(v) else str(int(v))
+                        ),
+                    )
+                if "is_winner" in sorted_table.columns:
+                    sorted_table.insert(
+                        0,
+                        "★",
+                        sorted_table["is_winner"].apply(lambda v: "★" if coerce_bool(v) else ""),
+                    )
+                st.dataframe(sorted_table, use_container_width=True, hide_index=True)
 
             selectable_df = table_df if not table_df.empty else display_df
             selected_run = st.selectbox("Select run", selectable_df["run_id"].astype(str).tolist())
@@ -1180,6 +1237,7 @@ def main() -> None:
                                             "evaluator_model": result["model"],
                                             "evaluation_parse_status": result["parse_status"],
                                             "evaluation_raw": result["raw_text"],
+                                            "evaluation_rank": None,
                                         },
                                     )
                                     update_record(
@@ -1188,16 +1246,71 @@ def main() -> None:
                                         {"is_winner": True},
                                     )
 
+                                    # Per-run rank: ranking[0] is draft #1's 1-indexed position, etc.
+                                    # ranking is a list of draft indices (1-based) ordered best-to-worst.
+                                    ranking = result.get("ranking") or []
+                                    run_id_by_draft_index = {
+                                        idx + 1: drafts[idx][0] for idx in range(len(drafts))
+                                    }
+                                    ranked_rows: List[Tuple[str, int]] = []
+                                    for rank_position, draft_number in enumerate(ranking, start=1):
+                                        run_id_for_rank = run_id_by_draft_index.get(draft_number)
+                                        if run_id_for_rank is None:
+                                            continue
+                                        update_record(
+                                            csv_path,
+                                            str(run_id_for_rank),
+                                            {"evaluation_rank": rank_position},
+                                        )
+                                        ranked_rows.append((str(run_id_for_rank), rank_position))
+
+                                    st.session_state["last_evaluation_result"] = {
+                                        "evaluation_id": evaluation_id,
+                                        "winner_run_id": str(winner_run_id),
+                                        "winner_index": result["winner_index"],
+                                        "total_drafts": len(drafts),
+                                        "parse_status": result["parse_status"],
+                                        "raw_text": result["raw_text"],
+                                        "winner_filename": winner_filename,
+                                        "evaluator_model": result["model"],
+                                        "batch_run_ids": batch_run_id_list,
+                                        "ranking": ranking,
+                                        "ranked_rows": ranked_rows,
+                                    }
+
                                     st.success(
                                         f"Winner: {winner_run_id} (draft {result['winner_index']} of {len(drafts)}). "
                                         f"Parse: {result['parse_status']}. Saved to {winner_filename}."
                                     )
                                     if result["parse_status"] != "clean":
                                         st.info(f"Raw evaluator response: {result['raw_text']!r}")
-                                    st.rerun()
 
                                 except Exception as eval_exc:
                                     st.error(f"Evaluation failed: {eval_exc}")
+
+            # Persistent panel showing the most recent evaluation's full reasoning.
+            last_eval = st.session_state.get("last_evaluation_result")
+            if last_eval:
+                st.markdown("### Latest evaluation")
+                st.markdown(
+                    f"**Winner:** draft {last_eval['winner_index']} of {last_eval['total_drafts']} "
+                    f"— run `{last_eval['winner_run_id']}`  \n"
+                    f"**Saved as:** `{last_eval['winner_filename']}`  \n"
+                    f"**Evaluator:** `{last_eval['evaluator_model']}` "
+                    f"(parse: {last_eval['parse_status']})"
+                )
+
+                ranked_rows = last_eval.get("ranked_rows") or []
+                if ranked_rows:
+                    rank_df = pd.DataFrame(ranked_rows, columns=["run_id", "rank"])
+                    rank_df = rank_df[["rank", "run_id"]].sort_values("rank").reset_index(drop=True)
+                    st.markdown("**Ranking (best to worst):**")
+                    st.dataframe(rank_df, use_container_width=True, hide_index=True)
+                else:
+                    st.caption("No ranking line was returned by the evaluator.")
+
+                with st.expander("Evaluator reasoning", expanded=True):
+                    st.markdown(last_eval["raw_text"])
 
             st.download_button(
                 "Download all history",

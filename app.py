@@ -632,7 +632,8 @@ def main() -> None:
 
         api_key = ""
         try:
-            api_key = str(st.secrets.get("ANTHROPIC_API_KEY", "") or "").strip()
+            if "ANTHROPIC_API_KEY" in st.secrets:
+                api_key = str(st.secrets["ANTHROPIC_API_KEY"] or "").strip()
         except Exception:
             api_key = ""
         if not api_key:

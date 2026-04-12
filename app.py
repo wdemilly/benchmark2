@@ -32,52 +32,39 @@ You wrote every passage in the combined source texts document. The character pro
 Read all attached documents from beginning to end. Do not sample them.
 
 Then write the chapter from the outline exactly as you would write it yourself. Construct each sentence from within the habits of mind, sentence movement, and narrative logic already present in the source texts. Write the chapter straight through in one continuous pass, first sentence to last. Do not draft short and expand. Return plain text only, with normal prose paragraph breaks and no commentary.'''
-DEFAULT_MODEL = "claude-sonnet-4-6"
-DEFAULT_SCORING_MODEL = DEFAULT_MODEL
+DEFAULT_MODEL = "claude-opus-4-6"
+DEFAULT_EVALUATOR_MODEL = "claude-opus-4-6"
 DEFAULT_MAX_TOKENS = 12000
 MAX_ALLOWED_TOKENS = 32000
 MAX_CONTINUATIONS = 4
 PROMPTS_CSV = Path("prompts.csv")
 CURRENT_SESSION_KEY = "app_session_id"
 CURRENT_SESSION_RUN_IDS_KEY = "app_session_run_ids"
+LATEST_BATCH_RUN_IDS_KEY = "app_latest_batch_run_ids"
 
-DEFAULT_SCORING_PROMPT = '''You are approximating the numeric AI-confidence behavior of an Originality-style detector.
+EVALUATOR_PROMPT = '''You are reading N drafts of the same chapter of a novel. The drafts were generated from the same source material and outline but with different micro-prompt variations. Your task is to select the single strongest draft on the basis of prose quality.
 
-Score the provided text on a scale from 0 to 100, where:
-- 0 = very unlikely AI
-- 100 = very likely AI
+Read every draft in full before judging. Do not skim.
 
-Use an originality-style structural heat model. Higher scores should come from repeated structural pressure across runs and paragraphs, not from isolated vivid lines.
+Before you judge, infer the project's register from the drafts and source material: genre and subgenre, period, point of view, tense, narrator's class and position, and the established voice. Hold the drafts to their own standard. A historical novel should sound like one; a contemporary literary novel should not be judged for failing to sound historical. A first-person working-class narrator should not be penalized for lacking formal diction. Judge each draft against what this book is trying to be.
 
-Pay particular attention to:
-- fragment chains
-- repeated sentence openings
-- mirrored phrasing
-- binary contrast framing
-- stepped escalation
-- punch-line closures
-- action followed by emotional sealing
-- tightly controlled rhetorical progression
-- overly uniform sentence rhythm
-- repeated paragraph choreography
-- repeated abstract explanation of feeling
-- repeated interpretive framing
-- repeated polished summary sentences
-- repeated aphoristic closures
-- repeated calm, poised, knowing prose
-- repeated “the way…”
-- repeated “the kind/sort/type of…”
-- repeated “which meant…” / “which was…”
-- repeated “what X wanted/needed/knew…”
-- repeated em-dash shaping
-- repeated opposition-based phrasing such as “not X but Y”
+Judge on these criteria, in roughly this order of importance:
 
-Important:
-- Judge the full document, not isolated lines.
-- Focus on clustering and continuity of patterning.
-- Do not explain.
-- Do not justify.
-- Return only one integer from 0 to 100.
+1. RENDER VS. INTERPRET. The strongest draft shows; the weaker drafts explain. Reward drafts that trust the reader to draw meaning from concrete physical detail, gesture, and action. Penalize drafts that name emotions, summarize their own meaning, or close paragraphs with interpretive sentences that tell the reader what the scene meant. Polish that performs itself is a failure mode, not a strength.
+
+2. DIALOGUE DOING DRAMATIC WORK. Dialogue must carry tension, subtext, emotion, or forward motion -- ideally more than one at once. Penalize lines that could be cut without loss, characters taking polite turns stating positions, or exposition delivered in quotation marks.
+
+3. AVOIDANCE OF SPECIFIC TELLS. Penalize drafts that use any of these:
+   - Oppositional / negation-pivot constructions: "not X, but Y"; "it wasn't that she was tired, it was that--"; split versions across adjacent sentences.
+   - "The way..." or "how..." prefaces used to frame observation as significant ("the way the light fell," "how he held the reins").
+   - Em dashes in the first paragraph (hard fail).
+   - Frequent em dashes elsewhere.
+
+4. VOICE CONSISTENCY AND PERIOD/REGISTER FIDELITY. The established voice must hold throughout without drift, pastiche, or anachronism. Whatever period, class, or register the project has set for itself, the draft must sustain it. Reward specificity of detail appropriate to the narrator's position and world; penalize generic atmosphere or register slippage.
+
+5. SENTENCE CRAFT. Reward verbs that do work without adverbial propping; concrete nouns over abstract ones; rhythm that enacts rather than decorates; restraint from aphoristic or summary sentences; appropriate withholding.
+
+You will receive the drafts labeled DRAFT 1, DRAFT 2, etc. After reading all of them, return ONLY a single integer: the number of the winning draft. No explanation, no preamble, no commentary. Just the number.
 '''
 
 
@@ -86,6 +73,8 @@ def ensure_session_state() -> str:
         st.session_state[CURRENT_SESSION_KEY] = datetime.now().strftime("%Y%m%d_%H%M%S")
     if CURRENT_SESSION_RUN_IDS_KEY not in st.session_state:
         st.session_state[CURRENT_SESSION_RUN_IDS_KEY] = []
+    if LATEST_BATCH_RUN_IDS_KEY not in st.session_state:
+        st.session_state[LATEST_BATCH_RUN_IDS_KEY] = []
     return str(st.session_state[CURRENT_SESSION_KEY])
 
 
@@ -117,9 +106,11 @@ class RunRecord:
     output_tokens: Optional[int] = None
     output_words: Optional[int] = None
     truncation_flag: bool = False
-    auto_ai_score: Optional[float] = None
-    auto_ai_label: str = ""
-    auto_score_model: str = ""
+    evaluation_id: str = ""
+    is_winner: bool = False
+    evaluation_raw: str = ""
+    evaluation_parse_status: str = ""
+    evaluator_model: str = ""
     originality_label: str = ""
     originality_score: Optional[float] = None
     manual_rating: str = ""
@@ -445,40 +436,62 @@ def call_anthropic_with_continuation(
     }
 
 
-def parse_score_text(text: str) -> int:
+def parse_winner_integer(text: str, max_valid: int) -> Tuple[Optional[int], str]:
+    """Parse the first integer in the response. Returns (winner_index, parse_status).
+    parse_status is 'clean' if the response was just an integer, 'parsed' if extracted
+    from longer text, or 'failed' if no valid integer was found."""
     cleaned = (text or "").strip()
-    match = re.search(r"\b(\d{1,3})\b", cleaned)
-    if not match:
-        raise RuntimeError(f"Could not parse numeric score from scoring response: {cleaned!r}")
-    score = int(match.group(1))
-    if score < 0 or score > 100:
-        raise RuntimeError(f"Parsed score out of range 0-100: {score}")
-    return score
+    if not cleaned:
+        return None, "failed"
+
+    # Clean response: just an integer (possibly with trailing punctuation/whitespace)
+    if re.fullmatch(r"\d+[.\s]*", cleaned):
+        value = int(re.search(r"\d+", cleaned).group(0))
+        if 1 <= value <= max_valid:
+            return value, "clean"
+        return None, "failed"
+
+    # Parsed response: extract first integer in range
+    for match in re.finditer(r"\b(\d+)\b", cleaned):
+        value = int(match.group(1))
+        if 1 <= value <= max_valid:
+            return value, "parsed"
+
+    return None, "failed"
 
 
-def score_output_with_anthropic(
+def evaluate_drafts_with_anthropic(
     api_key: str,
     model: str,
-    chapter_text: str,
+    drafts: List[Tuple[str, str]],
 ) -> dict:
+    """Send N drafts to Opus for literary evaluation. drafts is a list of
+    (run_id, text) tuples. Returns dict with winner_run_id, winner_index,
+    raw_text, parse_status, model."""
     if anthropic is None:
         raise RuntimeError("anthropic package is not installed.")
 
     if not model or not model.strip():
-        raise RuntimeError("Scoring model is blank.")
+        raise RuntimeError("Evaluator model is blank.")
+
+    if len(drafts) < 2:
+        raise RuntimeError("Evaluation requires at least 2 drafts.")
 
     client = anthropic.Anthropic(api_key=api_key)
 
+    draft_blocks = []
+    for index, (_run_id, text) in enumerate(drafts, start=1):
+        draft_blocks.append(f"DRAFT {index}\n\n{text.strip()}")
+
     payload = (
-        f"{DEFAULT_SCORING_PROMPT}\n\n"
-        f"TEXT TO SCORE:\n"
-        f"{chapter_text}"
+        f"{EVALUATOR_PROMPT}\n\n"
+        + "\n\n---\n\n".join(draft_blocks)
     )
 
     resp = anthropic_messages_create_with_backoff(
         client,
         model=model.strip(),
-        max_tokens=32,
+        max_tokens=64,
         temperature=0,
         messages=[{"role": "user", "content": payload}],
         max_attempts=5,
@@ -486,19 +499,19 @@ def score_output_with_anthropic(
     )
 
     raw_text = extract_text_from_response(resp)
-    score = parse_score_text(raw_text)
+    winner_index, parse_status = parse_winner_integer(raw_text, max_valid=len(drafts))
 
-    if score >= 65:
-        label = "Likely AI"
-    elif score >= 40:
-        label = "Possibly AI"
-    else:
-        label = "Very unlikely AI"
+    if winner_index is None:
+        raise RuntimeError(f"Could not parse a valid draft number from evaluator response: {raw_text!r}")
+
+    winner_run_id = drafts[winner_index - 1][0]
 
     return {
-        "score": score,
-        "label": label,
+        "winner_run_id": winner_run_id,
+        "winner_index": winner_index,
         "raw_text": raw_text.strip(),
+        "parse_status": parse_status,
+        "model": model.strip(),
     }
 
 
@@ -532,6 +545,61 @@ def make_file_stub(session_id: str, batch_label: str, prompt_id: int, repetition
     timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_batch = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in batch_label.strip()) or "batch"
     return f"{session_id}_{timestamp_str}_{safe_batch}_p{prompt_id:02d}_r{repetition_index:02d}"
+
+
+def short_model_slug(model: str) -> str:
+    """Return a compact model designator for filenames: e.g. 'O4.6' for claude-opus-4-6,
+    'S4.6' for claude-sonnet-4-6, 'H4.5' for claude-haiku-4-5. Falls back to the raw name
+    for anything unrecognized."""
+    if not model:
+        return "model"
+    name = model.strip().lower()
+    family_map = [
+        ("opus", "O"),
+        ("sonnet", "S"),
+        ("haiku", "H"),
+    ]
+    prefix = None
+    for keyword, letter in family_map:
+        if keyword in name:
+            prefix = letter
+            break
+    if prefix is None:
+        safe = "".join(ch for ch in model if ch.isalnum() or ch in "-._")
+        return safe or "model"
+    # Extract first "N-M" or "N.M" number sequence after the family name
+    match = re.search(r"(\d+)[-.](\d+)", name)
+    if match:
+        return f"{prefix}{match.group(1)}.{match.group(2)}"
+    # Fall back to first single number
+    match = re.search(r"\d+", name)
+    if match:
+        return f"{prefix}{match.group(0)}"
+    return prefix
+
+
+def make_winner_filename(prompt_id: int, temperature: float, model: str) -> str:
+    """Build the winner filename per Walter's spec: 'P{id} T{temp} {model-slug} Winner.txt'."""
+    temp_str = f"{temperature:.1f}".lstrip("0") if temperature < 1 else f"{temperature:.1f}"
+    # "0.8" -> ".8"; "1.0" -> "1.0"
+    safe_temp = temp_str if temp_str.startswith(".") or temp_str.startswith("-") else temp_str
+    slug = short_model_slug(model)
+    timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"P{prompt_id} T{safe_temp} {slug} Winner {timestamp_str}.txt"
+
+
+def update_records_bulk(csv_path: Path, run_ids: List[str], updates: dict) -> None:
+    """Apply the same updates dict to every run_id in the list, in one pass."""
+    df = load_records(csv_path)
+    if df.empty or not run_ids:
+        return
+    mask = df["run_id"].astype(str).isin([str(r) for r in run_ids])
+    if not mask.any():
+        return
+    for key, value in updates.items():
+        if key in df.columns:
+            df.loc[mask, key] = value
+    df.to_csv(csv_path, index=False)
 
 
 def coerce_bool(value) -> bool:
@@ -584,15 +652,10 @@ def main() -> None:
             value="batch1",
             help="Optional for your own reference. Current-session export does not depend on this.",
         )
-        score_outputs = st.checkbox(
-            "Auto-score outputs after generation",
-            value=False,
-            help="Makes a second Claude API call after each chapter and saves a 0-100 AI-likelihood score.",
-        )
-        scoring_model = st.text_input(
-            "Scoring model",
-            value=DEFAULT_SCORING_MODEL,
-            help="Claude model used only for the post-generation numeric score.",
+        evaluator_model = st.text_input(
+            "Evaluator model",
+            value=DEFAULT_EVALUATOR_MODEL,
+            help="Claude model used by the 'Evaluate latest batch' button to pick the best draft.",
         )
 
         if max_tokens < 8000:
@@ -667,6 +730,7 @@ def main() -> None:
             else:
                 session_id = ensure_session_state()
                 selected_prompts = [p for p in prompt_defs if p["id"] in selected_ids]
+                st.session_state[LATEST_BATCH_RUN_IDS_KEY] = []
                 progress = st.progress(0)
                 status = st.empty()
                 failures = []
@@ -715,32 +779,6 @@ def main() -> None:
 
                             output_hash = sha256_text(output_text)
 
-                            auto_ai_score = None
-                            auto_ai_label = ""
-                            auto_score_raw = ""
-                            auto_score_model_used = ""
-
-                            if score_outputs:
-                                try:
-                                    status.write(
-                                        f"Scoring prompt {prompt_obj['id']} rep {repetition_index}/{int(runs_per_prompt)} "
-                                        f"(prompt {prompt_position}/{len(selected_prompts)}, overall {completed_runs + 1}/{total_runs})."
-                                    )
-                                    score_result = score_output_with_anthropic(
-                                        api_key=api_key,
-                                        model=scoring_model,
-                                        chapter_text=output_text,
-                                    )
-                                    auto_ai_score = float(score_result["score"])
-                                    auto_ai_label = str(score_result["label"])
-                                    auto_score_raw = str(score_result["raw_text"])
-                                    auto_score_model_used = str(scoring_model)
-                                    time.sleep(1.0)
-                                except Exception as score_exc:
-                                    warnings.append(
-                                        f"Prompt {prompt_obj['id']} rep {repetition_index}: scoring failed ({score_exc})"
-                                    )
-
                             meta = {
                                 "run_id": run_id,
                                 "session_id": session_id,
@@ -768,10 +806,6 @@ def main() -> None:
                                 "output_tokens": generation["output_tokens"],
                                 "output_words": generation["output_words"],
                                 "truncation_flag": generation["truncation_flag"],
-                                "auto_ai_score": auto_ai_score,
-                                "auto_ai_label": auto_ai_label,
-                                "auto_score_model": auto_score_model_used,
-                                "auto_score_raw": auto_score_raw,
                             }
                             save_text(meta_path, json.dumps(meta, indent=2))
 
@@ -804,13 +838,11 @@ def main() -> None:
                                     output_tokens=generation["output_tokens"],
                                     output_words=generation["output_words"],
                                     truncation_flag=bool(generation["truncation_flag"]),
-                                    auto_ai_score=auto_ai_score,
-                                    auto_ai_label=auto_ai_label,
-                                    auto_score_model=auto_score_model_used,
                                 ),
                             )
 
                             st.session_state[CURRENT_SESSION_RUN_IDS_KEY].append(run_id)
+                            st.session_state[LATEST_BATCH_RUN_IDS_KEY].append(run_id)
                             successes += 1
 
                         except Exception as exc:
@@ -833,6 +865,96 @@ def main() -> None:
 
     with right:
         st.subheader("Run log")
+
+        latest_batch_ids = list(st.session_state.get(LATEST_BATCH_RUN_IDS_KEY, []))
+        batch_count = len(latest_batch_ids)
+        evaluate_clicked = st.button(
+            f"Evaluate latest batch ({batch_count} draft{'s' if batch_count != 1 else ''})",
+            disabled=batch_count < 2,
+            help="Send all drafts from the most recent 'Run selected prompts' click to the evaluator. Opus picks the strongest on literary grounds.",
+        )
+
+        if evaluate_clicked:
+            if not api_key:
+                st.error("Enter an API key in the sidebar.")
+            else:
+                eval_df = load_records(csv_path)
+                batch_rows = eval_df[eval_df["run_id"].astype(str).isin([str(r) for r in latest_batch_ids])].copy()
+
+                if len(batch_rows) < 2:
+                    st.error("Need at least 2 drafts in the latest batch to evaluate.")
+                else:
+                    drafts: List[Tuple[str, str]] = []
+                    missing: List[str] = []
+                    for _, row in batch_rows.iterrows():
+                        run_id_val = str(row["run_id"])
+                        output_file_val = str(row.get("output_file", "") or "")
+                        if output_file_val and Path(output_file_val).exists():
+                            draft_text = Path(output_file_val).read_text(encoding="utf-8")
+                            drafts.append((run_id_val, draft_text))
+                        else:
+                            missing.append(run_id_val)
+
+                    if missing:
+                        st.warning(f"Skipping {len(missing)} run(s) with missing output files: {', '.join(missing)}")
+
+                    if len(drafts) < 2:
+                        st.error("Fewer than 2 drafts have readable output files. Cannot evaluate.")
+                    else:
+                        with st.spinner(f"Evaluating {len(drafts)} drafts with {evaluator_model}..."):
+                            try:
+                                result = evaluate_drafts_with_anthropic(
+                                    api_key=api_key,
+                                    model=evaluator_model,
+                                    drafts=drafts,
+                                )
+
+                                winner_run_id = result["winner_run_id"]
+                                winner_row = batch_rows[batch_rows["run_id"].astype(str) == str(winner_run_id)].iloc[0]
+                                winner_prompt_id = int(winner_row["prompt_id"])
+                                winner_temperature = float(winner_row["temperature"])
+                                winner_model = str(winner_row["model"])
+                                winner_output_file = str(winner_row["output_file"])
+
+                                winner_text = Path(winner_output_file).read_text(encoding="utf-8")
+                                winner_filename = make_winner_filename(
+                                    prompt_id=winner_prompt_id,
+                                    temperature=winner_temperature,
+                                    model=winner_model,
+                                )
+                                winner_path = OUTPUTS_DIR / winner_filename
+                                save_text(winner_path, winner_text)
+
+                                evaluation_id = f"eval_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+                                batch_run_id_list = [str(r) for r in batch_rows["run_id"].astype(str).tolist()]
+                                update_records_bulk(
+                                    csv_path,
+                                    batch_run_id_list,
+                                    {
+                                        "is_winner": False,
+                                        "evaluation_id": evaluation_id,
+                                        "evaluator_model": result["model"],
+                                        "evaluation_parse_status": result["parse_status"],
+                                        "evaluation_raw": result["raw_text"],
+                                    },
+                                )
+                                update_record(
+                                    csv_path,
+                                    str(winner_run_id),
+                                    {"is_winner": True},
+                                )
+
+                                st.success(
+                                    f"Winner: {winner_run_id} (draft {result['winner_index']} of {len(drafts)}). "
+                                    f"Parse: {result['parse_status']}. Saved to {winner_filename}."
+                                )
+                                if result["parse_status"] != "clean":
+                                    st.info(f"Raw evaluator response: {result['raw_text']!r}")
+
+                            except Exception as eval_exc:
+                                st.error(f"Evaluation failed: {eval_exc}")
+
         df = load_records(csv_path)
         session_run_ids = list(st.session_state.get(CURRENT_SESSION_RUN_IDS_KEY, []))
 
@@ -917,9 +1039,11 @@ def main() -> None:
                 "output_words": None if pd.isna(current.get("output_words")) else int(current.get("output_words")),
                 "continuation_rounds": None if pd.isna(current.get("continuation_rounds")) else int(current.get("continuation_rounds")),
                 "truncation_flag": coerce_bool(current.get("truncation_flag")),
-                "auto_ai_score": None if pd.isna(current.get("auto_ai_score")) else float(current.get("auto_ai_score")),
-                "auto_ai_label": str(current.get("auto_ai_label", "")),
-                "auto_score_model": str(current.get("auto_score_model", "")),
+                "is_winner": coerce_bool(current.get("is_winner")),
+                "evaluation_id": str(current.get("evaluation_id", "") or ""),
+                "evaluator_model": str(current.get("evaluator_model", "") or ""),
+                "evaluation_parse_status": str(current.get("evaluation_parse_status", "") or ""),
+                "evaluation_raw": str(current.get("evaluation_raw", "") or ""),
                 "output_sha256": str(current.get("output_sha256", "")),
             })
 

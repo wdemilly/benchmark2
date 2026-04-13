@@ -806,7 +806,21 @@ def main() -> None:
                 "the environment, or enter it manually here."
             )
 
-        temperature = st.slider("Temperature", 0.0, 1.5, 1.0, 0.1)
+        temperatures_raw = st.text_input(
+            "Temperature(s)",
+            value="1.0",
+            help="One or more temperatures, comma-separated (e.g. '0.7, 1.0, 1.3'). Each selected prompt will be run at every listed temperature, for the number of repetitions set below.",
+        )
+        try:
+            temperatures = [float(t.strip()) for t in temperatures_raw.split(",") if t.strip()]
+            for t in temperatures:
+                if t < 0.0 or t > 1.5:
+                    raise ValueError(f"Temperature {t} is outside the allowed range 0.0-1.5.")
+            if not temperatures:
+                raise ValueError("No temperatures provided.")
+        except Exception as exc:
+            st.error(f"Invalid temperature list: {exc}")
+            temperatures = [1.0]
         max_tokens = st.number_input(
             "Max output tokens per API call",
             min_value=500,
@@ -912,7 +926,7 @@ def main() -> None:
                 failures = []
                 warnings = []
                 successes = 0
-                total_runs = len(selected_prompts) * int(runs_per_prompt)
+                total_runs = len(selected_prompts) * int(runs_per_prompt) * len(temperatures)
                 completed_runs = 0
 
                 for prompt_position, prompt_obj in enumerate(selected_prompts, start=1):
@@ -924,12 +938,14 @@ def main() -> None:
                         profiles_text=profiles_text,
                     )
 
-                    for repetition_index in range(1, int(runs_per_prompt) + 1):
-                        file_stub = make_file_stub(session_id, batch_label, prompt_obj["id"], repetition_index)
+                    for temperature in temperatures:
+                      for repetition_index in range(1, int(runs_per_prompt) + 1):
+                        output_temp_str = f"{float(temperature):.1f}"
+                        temp_tag = f"t{output_temp_str.replace('.', 'p')}"
+                        file_stub = make_file_stub(session_id, batch_label, prompt_obj["id"], repetition_index) + f"_{temp_tag}"
                         run_id = file_stub
 
                         output_slug = short_model_slug(model)
-                        output_temp_str = f"{float(temperature):.1f}"
                         output_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
                         output_filename = (
                             f"P{prompt_obj['id']} T{output_temp_str} {output_slug} "
@@ -943,7 +959,7 @@ def main() -> None:
 
                         try:
                             status.write(
-                                f"Running prompt {prompt_obj['id']} rep {repetition_index}/{int(runs_per_prompt)} "
+                                f"Running prompt {prompt_obj['id']} temp {output_temp_str} rep {repetition_index}/{int(runs_per_prompt)} "
                                 f"(prompt {prompt_position}/{len(selected_prompts)}, overall {completed_runs + 1}/{total_runs})..."
                             )
 
@@ -1031,7 +1047,7 @@ def main() -> None:
 
                         except Exception as exc:
                             failures.append(
-                                f"Prompt {prompt_obj['id']} rep {repetition_index}: {exc}"
+                                f"Prompt {prompt_obj['id']} temp {output_temp_str} rep {repetition_index}: {exc}"
                             )
 
                         completed_runs += 1

@@ -26,13 +26,7 @@ DATA_DIR.mkdir(exist_ok=True)
 OUTPUTS_DIR = DATA_DIR / "flat_outputs"
 OUTPUTS_DIR.mkdir(exist_ok=True)
 
-DEFAULT_BASE_PROMPT = '''You are not Claude. You are the author of the combined source texts document.
-
-You wrote every passage in the combined source texts document. The character profiles are your notes. The outline is your plan for this chapter.
-
-Read all attached documents from beginning to end. Do not sample them.
-
-Then write the chapter from the outline exactly as you would write it yourself. Construct each sentence from within the habits of mind, sentence movement, and narrative logic already present in the source texts. Write the chapter straight through in one continuous pass, first sentence to last. Do not draft short and expand. Return plain text only, with normal prose paragraph breaks and no commentary.'''
+DEFAULT_BASE_PROMPT = '''Read all attached documents from beginning to end. Do not sample them. Then follow the instructions in the micro-prompt below to write the chapter. Write the chapter straight through in one continuous pass. Return plain text only, with normal paragraph breaks and no commentary.'''
 DEFAULT_MODEL = "claude-opus-4-6"
 DEFAULT_EVALUATOR_MODEL = "claude-opus-4-6"
 DEFAULT_MAX_TOKENS = 12000

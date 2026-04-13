@@ -41,31 +41,40 @@ EVALUATOR_PROMPT = '''You are reading N drafts of the same chapter of a novel. T
 
 Read every draft in full before judging. Do not skim.
 
-Before you judge, infer the project's register from the drafts and source material: genre and subgenre, period, point of view, tense, narrator's class and position, and the established voice. Hold the drafts to their own standard. A historical novel should sound like one; a contemporary literary novel should not be judged for failing to sound historical. A first-person working-class narrator should not be penalized for lacking formal diction. Judge each draft against what this book is trying to be.
+Before each draft you will find a SIGNATURE SCAN block: a mechanical count of specific AI tells that was performed on the draft text before you saw it. These counts are not suggestions or impressions; they are evidence. You must treat them as binding inputs to your judgment. A draft whose scan shows heavy tell-density cannot be ranked first on the basis of surface polish, "literary" atmosphere, or elegant rhythm. Polish that performs itself is a failure mode. The tells quantified in the scan are the most common vehicles of that failure.
 
-Judge on these criteria, in roughly this order of importance:
+Before you judge content, infer the project's register from the drafts and source material: genre and subgenre, period, point of view, tense, narrator's class and position, and the established voice. Hold the drafts to their own standard. A historical novel should sound like one; a contemporary literary novel should not be judged for failing to sound historical. A first-person working-class narrator should not be penalized for lacking formal diction.
 
-1. RENDER VS. INTERPRET. The strongest draft shows; the weaker drafts explain. Reward drafts that trust the reader to draw meaning from concrete physical detail, gesture, and action. Penalize drafts that name emotions, summarize their own meaning, or close paragraphs with interpretive sentences that tell the reader what the scene meant. Polish that performs itself is a failure mode, not a strength.
+Judge on these criteria, in this order of weight:
 
-2. DIALOGUE DOING DRAMATIC WORK. Dialogue must carry tension, subtext, emotion, or forward motion -- ideally more than one at once. Penalize lines that could be cut without loss, characters taking polite turns stating positions, or exposition delivered in quotation marks.
+1. AI SIGNATURE DENSITY (from the scan blocks). Use the scan counts as primary evidence. The tells are:
+   - Oppositional / negation-pivot constructions ("not X, but Y"; "not hostile. Not cruel. Interested.").
+   - "The way..." and "how..." prefaces that frame observation as significant.
+   - Em dashes, with any em dash in the first paragraph treated as a hard fail.
+   - Dramatic sentence fragments used for rhythm ("Global. Ancient." / "Learning. Adapting.").
+   - Vague "something" as a mystery placeholder.
+   - Tricolons (rule-of-three lists).
+   - "Just" used as a dramatic minimizer ("Just listens. Takes notes.").
+   - Colon-based dramatic reveals ("Worst part: improvement.").
+   - "Rather than" contrastive constructions.
+   - Improvement-template and abstract-critical vocabulary ("compelling," "resonant," "nuanced," "remarkable").
+   A draft with markedly higher tell counts than its peers must be ranked below them unless it is the only draft rendering the scene with real specificity, in which case you must explicitly justify the exception.
 
-3. AVOIDANCE OF SPECIFIC TELLS. Penalize drafts that use any of these:
-   - Oppositional / negation-pivot constructions: "not X, but Y"; "it wasn't that she was tired, it was that--"; split versions across adjacent sentences.
-   - "The way..." or "how..." prefaces used to frame observation as significant ("the way the light fell," "how he held the reins").
-   - Em dashes in the first paragraph (hard fail).
-   - Frequent em dashes elsewhere.
+2. RENDER VS. INTERPRET. The strongest draft shows; the weaker drafts explain. Reward drafts that trust the reader to draw meaning from concrete physical detail, gesture, and action. Penalize drafts that name emotions, summarize their own meaning, or close paragraphs with interpretive sentences that tell the reader what the scene meant.
 
-4. VOICE CONSISTENCY AND PERIOD/REGISTER FIDELITY. The established voice must hold throughout without drift, pastiche, or anachronism. Whatever period, class, or register the project has set for itself, the draft must sustain it. Reward specificity of detail appropriate to the narrator's position and world; penalize generic atmosphere or register slippage.
+3. DIALOGUE DOING DRAMATIC WORK. Dialogue must carry tension, subtext, emotion, or forward motion -- ideally more than one at once. Penalize lines that could be cut without loss, characters taking polite turns stating positions, or exposition delivered in quotation marks.
+
+4. VOICE CONSISTENCY AND PERIOD/REGISTER FIDELITY. The established voice must hold throughout without drift, pastiche, or anachronism. Reward specificity of detail appropriate to the narrator's position and world; penalize generic atmosphere or register slippage.
 
 5. SENTENCE CRAFT. Reward verbs that do work without adverbial propping; concrete nouns over abstract ones; rhythm that enacts rather than decorates; restraint from aphoristic or summary sentences; appropriate withholding.
 
-You will receive the drafts labeled DRAFT 1, DRAFT 2, etc. Read every draft in full before beginning your analysis.
+You will receive the drafts labeled DRAFT 1, DRAFT 2, etc., each preceded by its SIGNATURE SCAN block. Read every draft in full before beginning your analysis.
 
-Then produce your evaluation in this exact format:
+Produce your evaluation in this exact format:
 
-First, for each draft, write a short paragraph (3-6 sentences) assessing it against the criteria above. Quote specific sentences when flagging failures or praising successes. Do not be diplomatic — the weaker drafts should be identified as weaker and why.
+First, for each draft, write a short paragraph (4-7 sentences). Begin by naming the draft's signature profile from its scan (e.g., "Draft 3 runs heavy on em dashes and negation pivots; hard fail in the opening paragraph"). Then assess render-vs-interpret, dialogue, voice, and sentence craft, quoting specific sentences for both failures and successes. Do not be diplomatic.
 
-Then write a comparison paragraph that names the two or three closest contenders and the specific reasons one edges out the others.
+Then write a comparison paragraph that names the two or three closest contenders and the specific reasons one edges out the others. If a draft with the lowest tell count is not your winner, justify explicitly why the content strengths override the signature evidence.
 
 Then, on a line by itself, write exactly:
 
@@ -129,6 +138,8 @@ class RunRecord:
     originality_score: Optional[float] = None
     manual_rating: str = ""
     manual_notes: str = ""
+    signature_score: Optional[int] = None
+    signature_report: str = ""
 
 
 def load_prompt_definitions(csv_path: Path) -> List[dict]:
@@ -259,6 +270,7 @@ def load_records(csv_path: Path) -> pd.DataFrame:
         "originality_label",
         "manual_rating",
         "manual_notes",
+        "signature_report",
     ]
 
     bool_columns = [
@@ -277,6 +289,7 @@ def load_records(csv_path: Path) -> pd.DataFrame:
         "output_words",
         "originality_score",
         "evaluation_rank",
+        "signature_score",
     ]
 
     if csv_path.exists():
@@ -579,6 +592,186 @@ def parse_ranking_list(text: str, max_valid: int) -> List[int]:
     return found
 
 
+def scan_ai_signatures(text: str) -> dict:
+    """Mechanically count AI prose tells in a draft.
+
+    Returns a dict with per-category counts, example snippets for the judge,
+    a composite score (sum of counts with a hard-fail bonus for em dashes in
+    paragraph 1), and a formatted report string suitable for pasting into
+    the evaluator payload.
+    """
+    if not text:
+        return {
+            "score": 0,
+            "counts": {},
+            "examples": {},
+            "first_para_em_dash": False,
+            "report": "(empty draft)",
+        }
+
+    # Use original text for em dashes (they may have been replaced with -- in
+    # normalize_text, so check for both).
+    t = text
+
+    def find_all(pattern: str, flags=re.IGNORECASE) -> List[str]:
+        return [m.group(0) for m in re.finditer(pattern, t, flags)]
+
+    # --- First paragraph em dash check (hard fail) ---
+    first_para = t.split("\n\n", 1)[0] if "\n\n" in t else t.split("\n", 1)[0]
+    first_para_em_dash = bool(re.search(r"—|--", first_para))
+
+    # --- 1. Em dashes anywhere ---
+    em_dashes = find_all(r"—|(?<!\w)--(?!\w)")
+
+    # --- 2. Negation-pivot / oppositional ---
+    # "not X, but Y" / "not X but Y" / "not just X but Y"
+    negation_pivot = find_all(
+        r"\bnot\b(?:\s+just)?\s+[^.,;:\n]{1,80}?[,\s]+but\s+[^.,;:\n]{1,80}",
+    )
+    # "Not X. Not Y. Z." pattern: two consecutive "Not "-opening sentences
+    # followed by a short third sentence.
+    negation_stack = find_all(
+        r"\bNot\s+[A-Za-z][^.!?\n]{1,50}[.!?]\s+Not\s+[A-Za-z][^.!?\n]{1,50}[.!?]",
+    )
+    # "It wasn't that X, it was that Y"
+    wasnt_that = find_all(
+        r"\b(?:it|that|he|she|they)\s+(?:wasn'?t|weren'?t|isn'?t|aren'?t)\s+(?:that\s+)?[^.,;:\n]{1,80}?[,\s]+(?:it|that|he|she|they)\s+(?:was|were|is|are)\s+",
+    )
+
+    # --- 3. "The way..." / "how..." framing ---
+    the_way = find_all(r"\bthe\s+way\s+(?:he|she|they|it|the|a|an|his|her|their|its)\b")
+    how_framed = find_all(
+        r"(?:noticed|saw|watched|felt|heard|knew|remembered|understood|realized|marked)\s+how\s+(?:he|she|they|it|the|a|an|his|her|their|its)\b",
+    )
+
+    # --- 4. Dramatic sentence fragments ---
+    # One-word or two-word "sentences" ending with period, between other sentences.
+    # Heuristic: find short fragments (1-3 words, capitalized first word, no verb heuristic).
+    # To keep false positives down, look for runs of two-or-more consecutive short frags.
+    frag_pattern = re.compile(
+        r"(?<=[.!?]\s)([A-Z][a-z]+(?:\s+[A-Za-z]+){0,2})\.\s+([A-Z][a-z]+(?:\s+[A-Za-z]+){0,2})\."
+    )
+    fragments = [m.group(0) for m in frag_pattern.finditer(t)]
+
+    # --- 5. Vague "something" ---
+    something_vague = find_all(
+        r"\bsomething\s+(?:vast|ancient|wrong|broken|old|deep|huge|terrible|strange|else|more|like|in|about|that|he|she|they|it)\b",
+    )
+
+    # --- 6. Tricolons (rule of three) ---
+    # Three comma-separated single words or two-word phrases in a row, typically
+    # nouns or gerunds. Pattern: "word, word, and word" or "word, word, word"
+    tricolons = find_all(
+        r"(?<![\w])([A-Za-z]+(?:ing|ion|ce|ty|th|ness)?),\s+([A-Za-z]+(?:ing|ion|ce|ty|th|ness)?),\s+(?:and\s+)?([A-Za-z]+(?:ing|ion|ce|ty|th|ness)?)\b",
+    )
+    # Also catch fragment-tricolons: "Learning. Adapting. Refining."
+    frag_tricolons = find_all(
+        r"(?<=[.!?]\s)([A-Z][a-z]+)\.\s+([A-Z][a-z]+)\.\s+([A-Z][a-z]+)\.",
+    )
+
+    # --- 7. "Just" as dramatic minimizer ---
+    # "Just <verb>s." or "Just <noun>." at sentence start or after period.
+    just_minimizer = find_all(
+        r"(?:^|(?<=[.!?]\s))Just\s+[a-z][^.!?\n]{1,40}[.!?]",
+    )
+
+    # --- 8. Colon-based dramatic reveals ---
+    # Short clause followed by colon followed by short payload, mid-paragraph.
+    # e.g. "Worst part: improvement."  "His term for them: hollow folk."
+    colon_reveals = find_all(
+        r"(?:^|(?<=[.!?]\s))[A-Z][^.!?:\n]{1,40}:\s+[a-z][^.!?\n]{1,60}[.!?]",
+    )
+
+    # --- 9. "Rather than" constructions ---
+    rather_than = find_all(r"\brather\s+than\b")
+
+    # --- 10. Improvement-template / abstract critical vocab ---
+    # Only flags in narrative prose; your own editorial reports will trip these,
+    # but that's fine since you want to spot them anywhere.
+    abstract_praise = find_all(
+        r"\b(?:compelling|resonant|nuanced|remarkable|sophisticated|profound|poignant|evocative|masterful|genuine(?:ly)?)\b",
+    )
+    improvement_template = find_all(
+        r"\b(?:would\s+benefit\s+from|could\s+be\s+strengthened|consider\s+(?:adding|revising|rewriting)|might\s+help)\b",
+    )
+
+    counts = {
+        "em_dashes": len(em_dashes),
+        "negation_pivot": len(negation_pivot) + len(negation_stack) + len(wasnt_that),
+        "the_way_how": len(the_way) + len(how_framed),
+        "dramatic_fragments": len(fragments),
+        "vague_something": len(something_vague),
+        "tricolons": len(tricolons) + len(frag_tricolons),
+        "just_minimizer": len(just_minimizer),
+        "colon_reveals": len(colon_reveals),
+        "rather_than": len(rather_than),
+        "abstract_praise": len(abstract_praise),
+        "improvement_template": len(improvement_template),
+    }
+
+    # Composite score. Em dash in first paragraph is a hard fail: +50.
+    score = sum(counts.values())
+    if first_para_em_dash:
+        score += 50
+
+    # Representative examples (first two hits per category) for the judge.
+    examples = {
+        "em_dashes": em_dashes[:2],
+        "negation_pivot": (negation_pivot + negation_stack + wasnt_that)[:2],
+        "the_way_how": (the_way + how_framed)[:2],
+        "dramatic_fragments": fragments[:2],
+        "vague_something": something_vague[:2],
+        "tricolons": (tricolons + frag_tricolons)[:2],
+        "just_minimizer": just_minimizer[:2],
+        "colon_reveals": colon_reveals[:2],
+        "rather_than": rather_than[:2],
+        "abstract_praise": abstract_praise[:2],
+        "improvement_template": improvement_template[:2],
+    }
+
+    # Build human-readable report.
+    label_map = {
+        "em_dashes": "Em dashes",
+        "negation_pivot": "Negation pivots (not X but Y / Not X. Not Y. Z.)",
+        "the_way_how": '"The way..." / "how..." framing',
+        "dramatic_fragments": "Dramatic fragment pairs",
+        "vague_something": 'Vague "something"',
+        "tricolons": "Tricolons (rule of three)",
+        "just_minimizer": '"Just" as dramatic minimizer',
+        "colon_reveals": "Colon-based dramatic reveals",
+        "rather_than": '"Rather than" constructions',
+        "abstract_praise": "Abstract critical vocabulary",
+        "improvement_template": "Improvement-template phrases",
+    }
+
+    lines: List[str] = []
+    lines.append(f"Composite signature score: {score}")
+    if first_para_em_dash:
+        lines.append("HARD FAIL: em dash in first paragraph (+50).")
+    for key, label in label_map.items():
+        n = counts[key]
+        if n == 0:
+            continue
+        sample_list = examples[key]
+        if sample_list:
+            sample = " | ".join(
+                s.strip().replace("\n", " ")[:80] for s in sample_list if s
+            )
+            lines.append(f"- {label}: {n}  [e.g. {sample}]")
+        else:
+            lines.append(f"- {label}: {n}")
+    if len(lines) == 1:
+        lines.append("(no tells detected)")
+
+    return {
+        "score": score,
+        "counts": counts,
+        "examples": examples,
+        "first_para_em_dash": first_para_em_dash,
+        "report": "\n".join(lines),
+    }
+
+
 def evaluate_drafts_with_anthropic(
     api_key: str,
     model: str,
@@ -596,8 +789,17 @@ def evaluate_drafts_with_anthropic(
     client = anthropic.Anthropic(api_key=api_key)
 
     draft_blocks = []
+    scans: List[dict] = []
     for index, (_run_id, text) in enumerate(drafts, start=1):
-        draft_blocks.append(f"DRAFT {index}\n\n{text.strip()}")
+        scan = scan_ai_signatures(text)
+        scans.append(scan)
+        draft_blocks.append(
+            f"DRAFT {index}\n"
+            f"SIGNATURE SCAN (mechanical pre-analysis, binding evidence):\n"
+            f"{scan['report']}\n\n"
+            f"--- draft text follows ---\n\n"
+            f"{text.strip()}"
+        )
 
     payload = (
         f"{EVALUATOR_PROMPT}\n\n"
@@ -652,6 +854,7 @@ def evaluate_drafts_with_anthropic(
         "raw_text": raw_text.strip(),
         "parse_status": parse_status,
         "model": model.strip(),
+        "scans": scans,
     }
 
 
@@ -1274,6 +1477,25 @@ def main() -> None:
                                         )
                                         ranked_rows.append((str(run_id_for_rank), rank_position))
 
+                                    # Persist per-draft signature scan results.
+                                    scans = result.get("scans") or []
+                                    scan_rows: List[Tuple[str, int, str]] = []
+                                    for idx, (draft_run_id, _) in enumerate(drafts):
+                                        if idx >= len(scans):
+                                            break
+                                        scan = scans[idx]
+                                        update_record(
+                                            csv_path,
+                                            str(draft_run_id),
+                                            {
+                                                "signature_score": int(scan["score"]),
+                                                "signature_report": scan["report"],
+                                            },
+                                        )
+                                        scan_rows.append(
+                                            (str(draft_run_id), int(scan["score"]), scan["report"])
+                                        )
+
                                     st.session_state["last_evaluation_result"] = {
                                         "evaluation_id": evaluation_id,
                                         "winner_run_id": str(winner_run_id),
@@ -1286,6 +1508,7 @@ def main() -> None:
                                         "batch_run_ids": batch_run_id_list,
                                         "ranking": ranking,
                                         "ranked_rows": ranked_rows,
+                                        "scan_rows": scan_rows,
                                     }
 
                                     st.success(
@@ -1311,13 +1534,26 @@ def main() -> None:
                 )
 
                 ranked_rows = last_eval.get("ranked_rows") or []
+                scan_rows = last_eval.get("scan_rows") or []
+                scan_lookup = {rid: (score, report) for rid, score, report in scan_rows}
+
                 if ranked_rows:
-                    rank_df = pd.DataFrame(ranked_rows, columns=["run_id", "rank"])
-                    rank_df = rank_df[["rank", "run_id"]].sort_values("rank").reset_index(drop=True)
-                    st.markdown("**Ranking (best to worst):**")
+                    rows_with_scores = []
+                    for rid, rank in ranked_rows:
+                        score, _ = scan_lookup.get(rid, ("", ""))
+                        rows_with_scores.append({"rank": rank, "run_id": rid, "sig_score": score})
+                    rank_df = pd.DataFrame(rows_with_scores)
+                    rank_df = rank_df.sort_values("rank").reset_index(drop=True)
+                    st.markdown("**Ranking (best to worst) with signature scores:**")
                     st.dataframe(rank_df, use_container_width=True, hide_index=True)
                 else:
                     st.caption("No ranking line was returned by the evaluator.")
+
+                if scan_rows:
+                    with st.expander("Signature scan details (per draft)", expanded=False):
+                        for rid, score, report in scan_rows:
+                            st.markdown(f"**Run `{rid}` — score {score}**")
+                            st.code(report, language=None)
 
                 with st.expander("Evaluator reasoning", expanded=True):
                     st.markdown(last_eval["raw_text"])

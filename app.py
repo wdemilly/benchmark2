@@ -35,9 +35,31 @@ DEFAULT_MAX_TOKENS = 12000
 MAX_ALLOWED_TOKENS = 32000
 MAX_CONTINUATIONS = 4
 PROMPTS_CSV = Path("prompts.csv")
+REPO_SOURCE_PATH = "reference/source.txt"
+REPO_PROFILES_PATH = "reference/profiles.txt"
 CURRENT_SESSION_KEY = "app_session_id"
 CURRENT_SESSION_RUN_IDS_KEY = "app_session_run_ids"
 LATEST_BATCH_RUN_IDS_KEY = "app_latest_batch_run_ids"
+
+
+def format_temp(temperature: float) -> str:
+    """Format a temperature value for filenames and display.
+
+    Preserves up to two decimal places of precision (so 0.75 displays as 0.75,
+    not 0.8) while keeping the common single-decimal cases clean (0.7 stays 0.7,
+    not 0.70; 1.0 stays 1.0).
+    """
+    # Round to two decimals; tiny nudge guards against FP drift on .x5-style inputs.
+    rounded = round(float(temperature) + 1e-9, 2)
+    formatted = f"{rounded:.2f}"
+    # Trim a single trailing zero on the hundredths place only (0.70 -> 0.7).
+    # Never strip below a single decimal (1.00 -> 1.0, not 1.).
+    if formatted.endswith("0") and "." in formatted:
+        integer_part, frac = formatted.split(".")
+        if len(frac) == 2 and frac[1] == "0":
+            formatted = f"{integer_part}.{frac[0]}"
+    return formatted
+
 
 EVALUATOR_PROMPT = '''You are reading N drafts of the same chapter of a novel. They were generated from the same source material and outline. Your job has two parts.
 
@@ -497,6 +519,37 @@ def _repo_path_for_local(local_path: Path) -> Optional[str]:
     except Exception:
         return None
     return rel.as_posix()
+
+
+def load_repo_text_cached(cfg: dict, repo_path: str) -> Tuple[str, str]:
+    """Fetch a text file from the configured GitHub repo, cached per session.
+
+    Returns (text, status_message). Empty text means the fetch failed or the
+    repo isn't configured; the status_message explains why.
+    """
+    cache_key = f"_repo_text_cache::{repo_path}"
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
+
+    if not cfg.get("configured"):
+        result = ("", "GitHub not configured. Set GITHUB_TOKEN and GITHUB_REPO in secrets.")
+        st.session_state[cache_key] = result
+        return result
+
+    data = github_get_file_bytes(cfg, repo_path)
+    if data is None:
+        result = ("", f"Could not fetch {repo_path} from repo {cfg.get('repo', '?')}@{cfg.get('branch', '?')}.")
+        st.session_state[cache_key] = result
+        return result
+
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        text = data.decode("utf-8", errors="replace")
+
+    result = (text, f"Loaded {repo_path} from repo ({len(text):,} chars).")
+    st.session_state[cache_key] = result
+    return result
 
 
 def github_pull_all(cfg: dict) -> dict:
@@ -1296,8 +1349,8 @@ def short_model_slug(model: str) -> str:
 
 
 def make_winner_filename(prompt_id: int, temperature: float, model: str) -> str:
-    temp_str = f"{temperature:.1f}".lstrip("0") if temperature < 1 else f"{temperature:.1f}"
-    safe_temp = temp_str if temp_str.startswith(".") or temp_str.startswith("-") else temp_str
+    temp_str = format_temp(temperature)
+    safe_temp = temp_str
     slug = short_model_slug(model)
     timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     return f"P{prompt_id} T{safe_temp} {slug} Winner {timestamp_str}.txt"
@@ -1506,23 +1559,63 @@ def main() -> None:
         outline_name = ""
         profiles_name = ""
 
-        uploaded_source = st.file_uploader("Upload combined source texts (.txt/.md)", type=["txt", "md"], key="src")
-        if uploaded_source is not None:
-            source_name = uploaded_source.name
-            source_text = decode_uploaded_text(uploaded_source)
-            st.info(f"Loaded source text: {source_name}")
+        # --- Source texts: repo or upload ---
+        source_mode = st.radio(
+            "Source texts",
+            options=["Use repo version", "Upload file"],
+            index=0,
+            horizontal=True,
+            key="source_mode",
+        )
+        if source_mode == "Use repo version":
+            source_text, source_status = load_repo_text_cached(github_cfg, REPO_SOURCE_PATH)
+            if source_text:
+                source_name = REPO_SOURCE_PATH
+                st.info(source_status)
+            else:
+                st.warning(source_status + " Switch to 'Upload file' or fix repo config.")
+        else:
+            uploaded_source = st.file_uploader(
+                "Upload combined source texts (.txt/.md)", type=["txt", "md"], key="src"
+            )
+            if uploaded_source is not None:
+                source_name = uploaded_source.name
+                source_text = decode_uploaded_text(uploaded_source)
+                st.info(f"Loaded source text: {source_name}")
 
-        uploaded_outline = st.file_uploader("Upload outline (.txt/.md)", type=["txt", "md"], key="out")
+        # --- Outline: upload only (changes per chapter) ---
+        uploaded_outline = st.file_uploader(
+            "Upload outline (.txt/.md)", type=["txt", "md"], key="out"
+        )
         if uploaded_outline is not None:
             outline_name = uploaded_outline.name
             outline_text = decode_uploaded_text(uploaded_outline)
             st.info(f"Loaded outline: {outline_name}")
 
-        uploaded_profiles = st.file_uploader("Upload character profiles (.txt/.md, optional)", type=["txt", "md"], key="prof")
-        if uploaded_profiles is not None:
-            profiles_name = uploaded_profiles.name
-            profiles_text = decode_uploaded_text(uploaded_profiles)
-            st.info(f"Loaded profiles: {profiles_name}")
+        # --- Profiles: repo, upload, or none ---
+        profiles_mode = st.radio(
+            "Character profiles",
+            options=["Use repo version", "Upload file", "None"],
+            index=0,
+            horizontal=True,
+            key="profiles_mode",
+        )
+        if profiles_mode == "Use repo version":
+            profiles_text, profiles_status = load_repo_text_cached(github_cfg, REPO_PROFILES_PATH)
+            if profiles_text:
+                profiles_name = REPO_PROFILES_PATH
+                st.info(profiles_status)
+            else:
+                st.warning(profiles_status + " Switch to 'Upload file' or 'None'.")
+        elif profiles_mode == "Upload file":
+            uploaded_profiles = st.file_uploader(
+                "Upload character profiles (.txt/.md)", type=["txt", "md"], key="prof"
+            )
+            if uploaded_profiles is not None:
+                profiles_name = uploaded_profiles.name
+                profiles_text = decode_uploaded_text(uploaded_profiles)
+                st.info(f"Loaded profiles: {profiles_name}")
+        # else: profiles_mode == "None" -- leave profiles_text empty
 
         st.markdown("### Prompt set")
         df_prompts = pd.DataFrame(prompt_defs)
@@ -1570,7 +1663,7 @@ def main() -> None:
 
                     for temperature in temperatures:
                       for repetition_index in range(1, int(runs_per_prompt) + 1):
-                        output_temp_str = f"{float(temperature):.1f}"
+                        output_temp_str = format_temp(float(temperature))
                         temp_tag = f"t{output_temp_str.replace('.', 'p')}"
                         file_stub = make_file_stub(session_id, batch_label, prompt_obj["id"], repetition_index) + f"_{temp_tag}"
                         run_id = file_stub

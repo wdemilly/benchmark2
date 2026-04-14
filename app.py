@@ -1133,6 +1133,110 @@ def evaluate_drafts_with_anthropic(
     }
 
 
+GRAFT_INSTRUCTIONS = """You are a careful line editor performing transplant grafts on a prose chapter.
+
+You will receive:
+  1. The WINNING CHAPTER (the base text).
+  2. A list of TRANSPLANT CANDIDATES, each with a quoted line from a losing draft, a target location in the winner, and a rationale.
+
+Your job is to produce a single revised chapter that integrates the transplants into the winner.
+
+RULES:
+- Begin with the winner's text as the base. Preserve it verbatim everywhere you are not grafting.
+- For each transplant, place it at the location indicated by GRAFT INTO. If the target is ambiguous or the transplant would not actually improve the passage, SKIP that transplant.
+- When grafting, adjust tense, pronoun, point of view, verb agreement, and surrounding punctuation so the seam is invisible. You may add or cut a small number of connective words on either side of the graft if needed for flow. Do not otherwise rewrite the winner's prose.
+- Do not invent new content. Do not summarize. Do not editorialize.
+- Do not introduce AI prose tells: no em-dash showers, no negation-pivot constructions, no "the way/how" observation framing, no aphoristic closers, no dramatic sentence fragments used for weight.
+- If a transplant does not fit cleanly (wrong register, redundant with winner, no sensible anchor), omit it rather than force it.
+
+OUTPUT FORMAT:
+First, output the full revised chapter as plain prose. No headings, no preamble, no quotation marks around the whole thing.
+
+Then output a single line of three equals signs on its own line: ===
+
+Then, under the heading GRAFT LOG, list each transplant candidate by its number and state one of:
+  APPLIED: <one-sentence note on where/how>
+  SKIPPED: <one-sentence reason>
+
+Nothing after the graft log."""
+
+
+def build_graft_payload(winner_text: str, transplants: List[dict]) -> str:
+    """Assemble the user-message payload for the graft call."""
+    lines: List[str] = []
+    lines.append("INSTRUCTIONS")
+    lines.append("=" * 70)
+    lines.append(GRAFT_INSTRUCTIONS)
+    lines.append("")
+    lines.append("=" * 70)
+    lines.append("WINNING CHAPTER")
+    lines.append("=" * 70)
+    lines.append(winner_text.strip())
+    lines.append("")
+    lines.append("=" * 70)
+    lines.append("TRANSPLANT CANDIDATES")
+    lines.append("=" * 70)
+    for i, tp in enumerate(transplants, start=1):
+        lines.append(f"{i}. FROM DRAFT {tp.get('source_draft', '?')} (run {tp.get('source_run_id', '')})")
+        lines.append(f'   QUOTE: "{tp.get("quote", "").strip()}"')
+        if tp.get("graft_into"):
+            lines.append(f"   GRAFT INTO: {tp['graft_into']}")
+        if tp.get("why"):
+            lines.append(f"   WHY: {tp['why']}")
+        lines.append("")
+    lines.append("Produce the revised chapter followed by the === separator and the GRAFT LOG, per the instructions above.")
+    return "\n".join(lines)
+
+
+def graft_transplants_with_anthropic(
+    api_key: str,
+    model: str,
+    winner_text: str,
+    transplants: List[dict],
+) -> dict:
+    """Send the winner + transplants to Claude and get back an integrated chapter.
+
+    Returns a dict with keys: grafted_text, graft_log, raw_text, model, stop_reason.
+    Uses call_anthropic_with_continuation so long chapters aren't truncated.
+    """
+    if anthropic is None:
+        raise RuntimeError("anthropic package is not installed.")
+    if not transplants:
+        raise RuntimeError("No transplants to graft.")
+
+    payload = build_graft_payload(winner_text, transplants)
+
+    result = call_anthropic_with_continuation(
+        api_key=api_key,
+        model=model.strip(),
+        payload=payload,
+        max_tokens=8000,
+        temperature=0.2,
+    )
+
+    raw_text = (result.get("text") or "").strip()
+    if not raw_text:
+        raise RuntimeError("Graft model returned empty text.")
+
+    # Split on the === separator. Be tolerant of extra whitespace.
+    separator_match = re.search(r"\n\s*={3,}\s*\n", raw_text)
+    if separator_match:
+        grafted_text = raw_text[: separator_match.start()].strip()
+        remainder = raw_text[separator_match.end():].strip()
+        graft_log = re.sub(r"^\s*GRAFT\s*LOG\s*:?\s*\n", "", remainder, flags=re.IGNORECASE).strip()
+    else:
+        grafted_text = raw_text
+        graft_log = "(no graft log parsed — model did not emit the === separator)"
+
+    return {
+        "grafted_text": grafted_text,
+        "graft_log": graft_log,
+        "raw_text": raw_text,
+        "model": model.strip(),
+        "stop_reason": result.get("stop_reason", ""),
+    }
+
+
 def gather_paths_for_records(df: pd.DataFrame, columns: Iterable[str]) -> List[Path]:
     paths: List[Path] = []
     seen = set()
@@ -1923,6 +2027,108 @@ def main() -> None:
                     tp_file = last_eval.get("transplants_file") or ""
                     if tp_file and Path(tp_file).exists():
                         st.caption(f"Saved to: `{Path(tp_file).name}`")
+
+                    # --- Graft transplants button -------------------------------------
+                    st.markdown("---")
+                    winner_filename_for_graft = last_eval.get("winner_filename") or ""
+                    winner_path_for_graft = OUTPUTS_DIR / winner_filename_for_graft if winner_filename_for_graft else None
+                    graft_ready = bool(
+                        winner_path_for_graft
+                        and winner_path_for_graft.exists()
+                        and api_key
+                    )
+
+                    graft_col_a, graft_col_b = st.columns([1, 2])
+                    with graft_col_a:
+                        graft_clicked = st.button(
+                            "Graft transplants into winner",
+                            disabled=not graft_ready,
+                            help=(
+                                "Sends the winner and the transplant list to Claude, which integrates "
+                                "each transplant at its target location, adjusts tense/POV/flow at the "
+                                "seam, and skips any transplant that does not fit cleanly. Saves the "
+                                "result as a new file you can download."
+                            ),
+                        )
+                    with graft_col_b:
+                        if not api_key:
+                            st.caption("Set your Anthropic API key to enable grafting.")
+                        elif not (winner_path_for_graft and winner_path_for_graft.exists()):
+                            st.caption("Winner file not found on disk.")
+
+                    if graft_clicked and graft_ready:
+                        try:
+                            winner_text_for_graft = winner_path_for_graft.read_text(encoding="utf-8")
+                            with st.spinner(f"Grafting {len(transplants)} transplant(s) with {evaluator_model}..."):
+                                graft_result = graft_transplants_with_anthropic(
+                                    api_key=api_key,
+                                    model=evaluator_model,
+                                    winner_text=winner_text_for_graft,
+                                    transplants=transplants,
+                                )
+
+                            grafted_stub = winner_filename_for_graft.rsplit(".txt", 1)[0]
+                            grafted_filename = f"{grafted_stub} Grafted.txt"
+                            grafted_path = OUTPUTS_DIR / grafted_filename
+                            save_text(grafted_path, graft_result["grafted_text"])
+
+                            log_filename = f"{grafted_stub} Graft Log.txt"
+                            log_path = OUTPUTS_DIR / log_filename
+                            log_body = (
+                                f"Graft log for: {grafted_filename}\n"
+                                f"Source winner: {winner_filename_for_graft}\n"
+                                f"Model: {graft_result['model']}\n"
+                                f"Stop reason: {graft_result.get('stop_reason', '')}\n"
+                                f"{'=' * 70}\n\n"
+                                f"{graft_result['graft_log']}\n"
+                            )
+                            save_text(log_path, log_body)
+
+                            st.session_state["last_graft_result"] = {
+                                "grafted_filename": grafted_filename,
+                                "grafted_path": str(grafted_path),
+                                "log_filename": log_filename,
+                                "log_path": str(log_path),
+                                "graft_log": graft_result["graft_log"],
+                                "stop_reason": graft_result.get("stop_reason", ""),
+                                "source_winner": winner_filename_for_graft,
+                            }
+
+                            if github_cfg["configured"]:
+                                try:
+                                    github_push_paths(
+                                        github_cfg,
+                                        [grafted_path, log_path],
+                                        commit_prefix="graft",
+                                    )
+                                except Exception as push_exc:
+                                    st.warning(f"Graft saved locally; GitHub push failed: {push_exc}")
+
+                            st.success(f"Grafted chapter saved as `{grafted_filename}`.")
+                        except Exception as graft_exc:
+                            st.error(f"Graft failed: {graft_exc}")
+
+                    last_graft = st.session_state.get("last_graft_result")
+                    if (
+                        last_graft
+                        and last_graft.get("source_winner") == winner_filename_for_graft
+                        and Path(last_graft.get("grafted_path", "")).exists()
+                    ):
+                        grafted_path_obj = Path(last_graft["grafted_path"])
+                        grafted_bytes = grafted_path_obj.read_bytes()
+                        st.download_button(
+                            "Download grafted chapter",
+                            data=grafted_bytes,
+                            file_name=last_graft["grafted_filename"],
+                            mime="text/plain",
+                            key=f"dl_graft_{last_graft['grafted_filename']}",
+                        )
+                        with st.expander("Graft log (what was applied vs. skipped)", expanded=False):
+                            st.markdown(last_graft["graft_log"])
+                            log_path_obj = Path(last_graft.get("log_path", ""))
+                            if log_path_obj.exists():
+                                st.caption(f"Saved to: `{log_path_obj.name}`")
+                    # ------------------------------------------------------------------
                 else:
                     st.caption("No transplant candidates proposed by the evaluator.")
 

@@ -6,12 +6,14 @@ import hashlib
 import shutil
 import re
 import os
+import base64
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple, Iterable
 
 import pandas as pd
+import requests
 import streamlit as st
 
 try:
@@ -37,56 +39,68 @@ CURRENT_SESSION_KEY = "app_session_id"
 CURRENT_SESSION_RUN_IDS_KEY = "app_session_run_ids"
 LATEST_BATCH_RUN_IDS_KEY = "app_latest_batch_run_ids"
 
-EVALUATOR_PROMPT = '''You are reading N drafts of the same chapter of a novel. The drafts were generated from the same source material and outline but with different micro-prompt variations. Your task is to select the single strongest draft on the basis of prose quality.
+EVALUATOR_PROMPT = '''You are reading N drafts of the same chapter of a novel. They were generated from the same source material and outline. Your job has two parts.
 
-Read every draft in full before judging. Do not skim.
+PART ONE: pick the best draft, as a reader of this genre would.
 
-Before each draft you will find a SIGNATURE SCAN block: a mechanical count of specific AI tells that was performed on the draft text before you saw it. These counts are not suggestions or impressions; they are evidence. You must treat them as binding inputs to your judgment. A draft whose scan shows heavy tell-density cannot be ranked first on the basis of surface polish, "literary" atmosphere, or elegant rhythm. Polish that performs itself is a failure mode. The tells quantified in the scan are the most common vehicles of that failure.
+Read every draft in full. Do not skim. Before judging, infer the project's register from the drafts themselves: genre and subgenre, period, point of view, tense, narrator's class and position, and established voice. Hold the drafts to their own standard, not to a generic "literary" ideal.
 
-Before you judge content, infer the project's register from the drafts and source material: genre and subgenre, period, point of view, tense, narrator's class and position, and the established voice. Hold the drafts to their own standard. A historical novel should sound like one; a contemporary literary novel should not be judged for failing to sound historical. A first-person working-class narrator should not be penalized for lacking formal diction.
+Then judge as an experienced reader of this specific genre would judge -- the kind of reader who buys new novels in this space, knows the conventions, and can tell a fresh sentence from a familiar one. Your question is simple: which of these drafts would that reader most want to keep reading?
 
-Judge on these criteria, in this order of weight:
+In answering, give weight to:
 
-1. AI SIGNATURE DENSITY (from the scan blocks). Use the scan counts as primary evidence. The tells are:
-   - Oppositional / negation-pivot constructions ("not X, but Y"; "not hostile. Not cruel. Interested.").
-   - "The way..." and "how..." prefaces that frame observation as significant.
-   - Em dashes, with any em dash in the first paragraph treated as a hard fail.
-   - Dramatic sentence fragments used for rhythm ("Global. Ancient." / "Learning. Adapting.").
-   - Vague "something" as a mystery placeholder.
-   - Tricolons (rule-of-three lists).
-   - "Just" used as a dramatic minimizer ("Just listens. Takes notes.").
-   - Colon-based dramatic reveals ("Worst part: improvement.").
-   - "Rather than" contrastive constructions.
-   - Improvement-template and abstract-critical vocabulary ("compelling," "resonant," "nuanced," "remarkable").
-   A draft with markedly higher tell counts than its peers must be ranked below them unless it is the only draft rendering the scene with real specificity, in which case you must explicitly justify the exception.
+- Specificity over atmosphere. Reward drafts where the writer commits to a concrete observed detail (an object, a gesture, a number, a name) instead of reaching for mood or generalization. Penalize drafts that produce the sensation of good writing through cadence alone.
+- Render over interpret. The strongest draft shows; weaker drafts explain. Penalize drafts that name emotions, summarize their own meaning, or close paragraphs or scenes with an interpretive sentence telling the reader what just happened.
+- Dialogue doing dramatic work. Lines must carry tension, subtext, character, or forward motion -- ideally more than one at once. Penalize polite turns stating positions, or exposition in quotation marks.
+- Voice consistency. The established voice must hold throughout without drift, pastiche, or anachronism.
+- Trust in the ending. The strongest draft ends on the beat the scene has earned and stops. Weaker drafts add a coda explaining or softening the beat.
+- Restraint with simile, aphorism, and summary. Reward sentences that leave the reader to do the work.
 
-2. RENDER VS. INTERPRET. The strongest draft shows; the weaker drafts explain. Reward drafts that trust the reader to draw meaning from concrete physical detail, gesture, and action. Penalize drafts that name emotions, summarize their own meaning, or close paragraphs with interpretive sentences that tell the reader what the scene meant.
+Be a demanding reader. Do not be diplomatic. If two drafts are close, say what specifically tips the decision.
 
-3. DIALOGUE DOING DRAMATIC WORK. Dialogue must carry tension, subtext, emotion, or forward motion -- ideally more than one at once. Penalize lines that could be cut without loss, characters taking polite turns stating positions, or exposition delivered in quotation marks.
+PART TWO: scavenge the losing drafts for transplantable material.
 
-4. VOICE CONSISTENCY AND PERIOD/REGISTER FIDELITY. The established voice must hold throughout without drift, pastiche, or anachronism. Reward specificity of detail appropriate to the narrator's position and world; penalize generic atmosphere or register slippage.
+After you have chosen the winner, go back through the non-winning drafts and find specific lines, phrases, images, or small passages that are better than what the winner has in the equivalent spot, and which could be grafted into the winner with minimal rewriting. An "average" draft may contain the single best line in the batch; that is what you are hunting for.
 
-5. SENTENCE CRAFT. Reward verbs that do work without adverbial propping; concrete nouns over abstract ones; rhythm that enacts rather than decorates; restraint from aphoristic or summary sentences; appropriate withholding.
+For each transplant candidate:
+- Quote the source text exactly (a line or a short passage, not a whole paragraph).
+- Name the source draft number.
+- Describe in one sentence where in the winner this should go -- which paragraph or scene beat it should replace or be inserted into.
+- Briefly say why it is stronger than what the winner has there.
 
-You will receive the drafts labeled DRAFT 1, DRAFT 2, etc., each preceded by its SIGNATURE SCAN block. Read every draft in full before beginning your analysis.
+Only propose a transplant if you genuinely believe the winner would be improved by it. Do not pad the list. Three or four strong transplant candidates is better than a dozen weak ones. Zero is a legitimate answer if the winner really is cleanly superior at every beat.
 
-Produce your evaluation in this exact format:
+OUTPUT FORMAT
 
-First, for each draft, write a short paragraph (4-7 sentences). Begin by naming the draft's signature profile from its scan (e.g., "Draft 3 runs heavy on em dashes and negation pivots; hard fail in the opening paragraph"). Then assess render-vs-interpret, dialogue, voice, and sentence craft, quoting specific sentences for both failures and successes. Do not be diplomatic.
+Produce your evaluation in this exact structure:
 
-Then write a comparison paragraph that names the two or three closest contenders and the specific reasons one edges out the others. If a draft with the lowest tell count is not your winner, justify explicitly why the content strengths override the signature evidence.
+1. A short paragraph (4-7 sentences) per draft, assessing its strengths and weaknesses as a reader of the genre would. Quote specific sentences, for both failures and successes.
 
-Then, on a line by itself, write exactly:
+2. A comparison paragraph naming the two or three closest contenders and the specific reasons one edges out the others.
+
+3. A section with the heading:
+
+TRANSPLANTS
+
+Under this heading, list each transplant candidate as a numbered item. Use this template exactly for each item:
+
+1. FROM DRAFT N: "<quoted text>"
+   GRAFT INTO: <where in the winner this belongs -- paragraph or beat>
+   WHY: <one sentence>
+
+If there are no transplants worth proposing, write: (none)
+
+4. On a line by itself:
 
 RANKING: N, N, N, ...
 
 where the numbers are every draft number in order from strongest to weakest, separated by commas. Include every draft exactly once.
 
-Then, on the final line of your response, write exactly:
+5. On the final line of your response:
 
 WINNER: N
 
-where N is the number of the winning draft (the first number in the ranking). Nothing after that line. The words RANKING and WINNER must appear in all caps followed by a colon.
+where N is the number of the winning draft. Nothing after that line. The words TRANSPLANTS, RANKING, and WINNER must appear in all caps.
 '''
 
 
@@ -240,6 +254,365 @@ def extract_text_from_response(resp) -> str:
 
 def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+# ----------------------------------------------------------------------------
+# GitHub sync
+#
+# Best-effort overlay on top of the local filesystem. On app startup the
+# contents of the configured repo are pulled down into DATA_DIR. After every
+# successful generation or evaluation the changed files are pushed back up.
+# Uses the GitHub REST contents API directly (one call per file) to avoid a
+# PyGithub dependency. Failures are logged but never block generation.
+# ----------------------------------------------------------------------------
+
+GITHUB_API_BASE = "https://api.github.com"
+GITHUB_SYNC_STATUS_KEY = "github_sync_status"
+GITHUB_PULLED_KEY = "github_pulled_this_session"
+
+
+def load_github_config() -> dict:
+    """Read GitHub sync config from Streamlit secrets first, then env vars.
+
+    Returns a dict with keys: token, repo, branch, configured (bool),
+    source (str describing where config was found).
+    """
+    token = ""
+    repo = ""
+    branch = ""
+    source = ""
+
+    try:
+        if "GITHUB_TOKEN" in st.secrets:
+            token = str(st.secrets.get("GITHUB_TOKEN", "")).strip()
+            repo = str(st.secrets.get("GITHUB_REPO", "")).strip()
+            branch = str(st.secrets.get("GITHUB_BRANCH", "") or "main").strip()
+            if token and repo:
+                source = "Streamlit secrets"
+    except Exception:
+        token = ""
+        repo = ""
+
+    if not (token and repo):
+        env_token = os.environ.get("GITHUB_TOKEN", "").strip()
+        env_repo = os.environ.get("GITHUB_REPO", "").strip()
+        env_branch = os.environ.get("GITHUB_BRANCH", "main").strip() or "main"
+        if env_token and env_repo:
+            token = env_token
+            repo = env_repo
+            branch = env_branch
+            source = "environment variable"
+
+    configured = bool(token and repo)
+    return {
+        "token": token,
+        "repo": repo,
+        "branch": branch or "main",
+        "configured": configured,
+        "source": source,
+    }
+
+
+def _gh_headers(token: str) -> dict:
+    return {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+
+def _gh_record_status(message: str, kind: str = "info") -> None:
+    st.session_state[GITHUB_SYNC_STATUS_KEY] = {
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "message": message,
+        "kind": kind,
+    }
+
+
+def github_list_tree(cfg: dict) -> List[dict]:
+    """List every file in the repo at cfg['branch'].
+
+    Returns a list of dicts with keys 'path' and 'sha'. Returns an empty
+    list if the branch is empty or the call fails.
+    """
+    if not cfg.get("configured"):
+        return []
+    repo = cfg["repo"]
+    branch = cfg["branch"]
+
+    # Resolve branch -> tree sha via the branches endpoint.
+    try:
+        branch_resp = requests.get(
+            f"{GITHUB_API_BASE}/repos/{repo}/branches/{branch}",
+            headers=_gh_headers(cfg["token"]),
+            timeout=15,
+        )
+    except requests.RequestException as exc:
+        _gh_record_status(f"GitHub list failed: {exc}", kind="error")
+        return []
+
+    if branch_resp.status_code == 404:
+        # Branch does not exist yet (fresh repo). Nothing to pull.
+        return []
+    if not branch_resp.ok:
+        _gh_record_status(
+            f"GitHub list failed: {branch_resp.status_code} {branch_resp.text[:200]}",
+            kind="error",
+        )
+        return []
+
+    tree_sha = (
+        branch_resp.json().get("commit", {}).get("commit", {}).get("tree", {}).get("sha")
+    )
+    if not tree_sha:
+        return []
+
+    try:
+        tree_resp = requests.get(
+            f"{GITHUB_API_BASE}/repos/{repo}/git/trees/{tree_sha}",
+            params={"recursive": "1"},
+            headers=_gh_headers(cfg["token"]),
+            timeout=30,
+        )
+    except requests.RequestException as exc:
+        _gh_record_status(f"GitHub tree read failed: {exc}", kind="error")
+        return []
+
+    if not tree_resp.ok:
+        _gh_record_status(
+            f"GitHub tree read failed: {tree_resp.status_code} {tree_resp.text[:200]}",
+            kind="error",
+        )
+        return []
+
+    entries = tree_resp.json().get("tree", []) or []
+    return [
+        {"path": entry["path"], "sha": entry["sha"]}
+        for entry in entries
+        if entry.get("type") == "blob" and entry.get("path")
+    ]
+
+
+def github_get_file_bytes(cfg: dict, path: str) -> Optional[bytes]:
+    """Fetch a single file's bytes from the repo. Returns None on failure."""
+    if not cfg.get("configured"):
+        return None
+    try:
+        resp = requests.get(
+            f"{GITHUB_API_BASE}/repos/{cfg['repo']}/contents/{path}",
+            params={"ref": cfg["branch"]},
+            headers=_gh_headers(cfg["token"]),
+            timeout=30,
+        )
+    except requests.RequestException:
+        return None
+    if not resp.ok:
+        return None
+    body = resp.json()
+    # For files under ~1MB the response includes base64 content directly.
+    if body.get("encoding") == "base64" and "content" in body:
+        try:
+            return base64.b64decode(body["content"])
+        except Exception:
+            return None
+    # For larger files, fall back to the download_url.
+    download_url = body.get("download_url")
+    if download_url:
+        try:
+            dl = requests.get(download_url, timeout=60)
+            if dl.ok:
+                return dl.content
+        except requests.RequestException:
+            return None
+    return None
+
+
+def github_get_file_sha(cfg: dict, path: str) -> Optional[str]:
+    """Return the blob sha of a file at the tip of the branch, or None if it
+    does not exist. Needed for updates (the API requires the current sha to
+    prevent races)."""
+    if not cfg.get("configured"):
+        return None
+    try:
+        resp = requests.get(
+            f"{GITHUB_API_BASE}/repos/{cfg['repo']}/contents/{path}",
+            params={"ref": cfg["branch"]},
+            headers=_gh_headers(cfg["token"]),
+            timeout=15,
+        )
+    except requests.RequestException:
+        return None
+    if resp.status_code == 404:
+        return None
+    if not resp.ok:
+        return None
+    return resp.json().get("sha")
+
+
+def github_put_file(cfg: dict, path: str, data: bytes, message: str) -> bool:
+    """Create or update a single file in the repo. Returns True on success."""
+    if not cfg.get("configured"):
+        return False
+
+    existing_sha = github_get_file_sha(cfg, path)
+
+    payload = {
+        "message": message,
+        "content": base64.b64encode(data).decode("ascii"),
+        "branch": cfg["branch"],
+    }
+    if existing_sha:
+        payload["sha"] = existing_sha
+
+    try:
+        resp = requests.put(
+            f"{GITHUB_API_BASE}/repos/{cfg['repo']}/contents/{path}",
+            headers=_gh_headers(cfg["token"]),
+            json=payload,
+            timeout=30,
+        )
+    except requests.RequestException as exc:
+        _gh_record_status(f"GitHub push failed for {path}: {exc}", kind="error")
+        return False
+
+    if not resp.ok:
+        _gh_record_status(
+            f"GitHub push failed for {path}: {resp.status_code} {resp.text[:200]}",
+            kind="error",
+        )
+        return False
+    return True
+
+
+def _local_path_for_repo_path(repo_path: str) -> Path:
+    """Map a repo-relative path back to its local filesystem path under DATA_DIR."""
+    return DATA_DIR / repo_path
+
+
+def _repo_path_for_local(local_path: Path) -> Optional[str]:
+    """Map a local path under DATA_DIR back to a forward-slash repo path.
+    Returns None if the file is not under DATA_DIR."""
+    try:
+        rel = local_path.resolve().relative_to(DATA_DIR.resolve())
+    except Exception:
+        return None
+    return rel.as_posix()
+
+
+def github_pull_all(cfg: dict) -> dict:
+    """Pull every file from the repo into DATA_DIR, overwriting local copies.
+
+    Returns a dict with counts: pulled, skipped, failed.
+    """
+    result = {"pulled": 0, "skipped": 0, "failed": 0}
+    if not cfg.get("configured"):
+        return result
+
+    tree = github_list_tree(cfg)
+    if not tree:
+        _gh_record_status("Pull: no files in repo (or repo is empty).", kind="info")
+        return result
+
+    for entry in tree:
+        repo_path = entry["path"]
+        local_path = _local_path_for_repo_path(repo_path)
+        data = github_get_file_bytes(cfg, repo_path)
+        if data is None:
+            result["failed"] += 1
+            continue
+        try:
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            local_path.write_bytes(data)
+            result["pulled"] += 1
+        except Exception:
+            result["failed"] += 1
+
+    _gh_record_status(
+        f"Pulled {result['pulled']} file(s) from {cfg['repo']}@{cfg['branch']}.",
+        kind="success" if result["failed"] == 0 else "warn",
+    )
+    return result
+
+
+def github_push_paths(cfg: dict, local_paths: List[Path], commit_prefix: str) -> dict:
+    """Push a list of local files to the repo. Returns dict with pushed/failed counts."""
+    result = {"pushed": 0, "failed": 0}
+    if not cfg.get("configured"):
+        return result
+
+    for local_path in local_paths:
+        if not local_path.exists() or not local_path.is_file():
+            continue
+        repo_path = _repo_path_for_local(local_path)
+        if repo_path is None:
+            continue
+        try:
+            data = local_path.read_bytes()
+        except Exception:
+            result["failed"] += 1
+            continue
+        commit_msg = f"{commit_prefix}: {repo_path}"
+        ok = github_put_file(cfg, repo_path, data, commit_msg)
+        if ok:
+            result["pushed"] += 1
+        else:
+            result["failed"] += 1
+
+    if result["pushed"] or result["failed"]:
+        kind = "success" if result["failed"] == 0 else "warn"
+        _gh_record_status(
+            f"Pushed {result['pushed']} file(s) to {cfg['repo']}"
+            + (f" ({result['failed']} failed)" if result["failed"] else ""),
+            kind=kind,
+        )
+    return result
+
+
+def github_push_after_generation(
+    cfg: dict,
+    csv_path: Path,
+    output_path: Path,
+    payload_path: Path,
+    micro_prompt_path: Path,
+    meta_path: Path,
+) -> None:
+    """Push the files produced by a single generation run plus the updated CSV."""
+    if not cfg.get("configured"):
+        return
+    github_push_paths(
+        cfg,
+        [csv_path, output_path, payload_path, micro_prompt_path, meta_path],
+        commit_prefix="generation",
+    )
+
+
+def github_push_after_evaluation(
+    cfg: dict,
+    csv_path: Path,
+    winner_path: Path,
+    transplants_path: Optional[Path],
+) -> None:
+    """Push the files produced by an evaluation plus the updated CSV."""
+    if not cfg.get("configured"):
+        return
+    paths = [csv_path, winner_path]
+    if transplants_path and transplants_path.exists():
+        paths.append(transplants_path)
+    github_push_paths(cfg, paths, commit_prefix="evaluation")
+
+
+def github_pull_on_startup_if_needed(cfg: dict, csv_path: Path) -> None:
+    """If the repo is configured and we have not yet pulled in this session, pull."""
+    if not cfg.get("configured"):
+        return
+    if st.session_state.get(GITHUB_PULLED_KEY):
+        return
+    # Only auto-pull if the local CSV is missing or empty. This avoids
+    # clobbering in-progress local work if the app is restarted mid-session.
+    local_empty = (not csv_path.exists()) or csv_path.stat().st_size == 0
+    if local_empty:
+        github_pull_all(cfg)
+    st.session_state[GITHUB_PULLED_KEY] = True
 
 
 def load_records(csv_path: Path) -> pd.DataFrame:
@@ -592,184 +965,83 @@ def parse_ranking_list(text: str, max_valid: int) -> List[int]:
     return found
 
 
-def scan_ai_signatures(text: str) -> dict:
-    """Mechanically count AI prose tells in a draft.
+def parse_transplants(text: str, max_draft: int) -> List[dict]:
+    """Parse the TRANSPLANTS section of the evaluator's response.
 
-    Returns a dict with per-category counts, example snippets for the judge,
-    a composite score (sum of counts with a hard-fail bonus for em dashes in
-    paragraph 1), and a formatted report string suitable for pasting into
-    the evaluator payload.
+    Looks for the 'TRANSPLANTS' heading and reads numbered items in the
+    prescribed format:
+
+        N. FROM DRAFT N: "<quoted text>"
+           GRAFT INTO: <location>
+           WHY: <one sentence>
+
+    Returns a list of dicts with keys: source_draft, quote, graft_into, why.
+    Returns [] if no section is found, if it says '(none)', or if no items
+    parse cleanly.
     """
-    if not text:
-        return {
-            "score": 0,
-            "counts": {},
-            "examples": {},
-            "first_para_em_dash": False,
-            "report": "(empty draft)",
-        }
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return []
 
-    # Use original text for em dashes (they may have been replaced with -- in
-    # normalize_text, so check for both).
-    t = text
-
-    def find_all(pattern: str, flags=re.IGNORECASE) -> List[str]:
-        return [m.group(0) for m in re.finditer(pattern, t, flags)]
-
-    # --- First paragraph em dash check (hard fail) ---
-    first_para = t.split("\n\n", 1)[0] if "\n\n" in t else t.split("\n", 1)[0]
-    first_para_em_dash = bool(re.search(r"—|--", first_para))
-
-    # --- 1. Em dashes anywhere ---
-    em_dashes = find_all(r"—|(?<!\w)--(?!\w)")
-
-    # --- 2. Negation-pivot / oppositional ---
-    # "not X, but Y" / "not X but Y" / "not just X but Y"
-    negation_pivot = find_all(
-        r"\bnot\b(?:\s+just)?\s+[^.,;:\n]{1,80}?[,\s]+but\s+[^.,;:\n]{1,80}",
+    # Isolate the section between TRANSPLANTS and the next all-caps section
+    # heading (RANKING, WINNER, or end-of-string).
+    section_match = re.search(
+        r"TRANSPLANTS\s*\n(.*?)(?=\n\s*(?:RANKING|WINNER)\s*[:\-]|\Z)",
+        cleaned,
+        re.IGNORECASE | re.DOTALL,
     )
-    # "Not X. Not Y. Z." pattern: two consecutive "Not "-opening sentences
-    # followed by a short third sentence.
-    negation_stack = find_all(
-        r"\bNot\s+[A-Za-z][^.!?\n]{1,50}[.!?]\s+Not\s+[A-Za-z][^.!?\n]{1,50}[.!?]",
-    )
-    # "It wasn't that X, it was that Y"
-    wasnt_that = find_all(
-        r"\b(?:it|that|he|she|they)\s+(?:wasn'?t|weren'?t|isn'?t|aren'?t)\s+(?:that\s+)?[^.,;:\n]{1,80}?[,\s]+(?:it|that|he|she|they)\s+(?:was|were|is|are)\s+",
+    if not section_match:
+        return []
+
+    section = section_match.group(1).strip()
+    if not section or re.fullmatch(r"\(?\s*none\s*\)?\.?", section, re.IGNORECASE):
+        return []
+
+    # Each item starts with a number followed by ". FROM DRAFT".
+    # Use a lookahead to split on item boundaries.
+    item_pattern = re.compile(
+        r"(?:^|\n)\s*\d+\.\s+FROM\s+DRAFT\s+(\d+)\s*[:\-]\s*(.*?)(?=\n\s*\d+\.\s+FROM\s+DRAFT\s+\d+|\Z)",
+        re.IGNORECASE | re.DOTALL,
     )
 
-    # --- 3. "The way..." / "how..." framing ---
-    the_way = find_all(r"\bthe\s+way\s+(?:he|she|they|it|the|a|an|his|her|their|its)\b")
-    how_framed = find_all(
-        r"(?:noticed|saw|watched|felt|heard|knew|remembered|understood|realized|marked)\s+how\s+(?:he|she|they|it|the|a|an|his|her|their|its)\b",
-    )
-
-    # --- 4. Dramatic sentence fragments ---
-    # One-word or two-word "sentences" ending with period, between other sentences.
-    # Heuristic: find short fragments (1-3 words, capitalized first word, no verb heuristic).
-    # To keep false positives down, look for runs of two-or-more consecutive short frags.
-    frag_pattern = re.compile(
-        r"(?<=[.!?]\s)([A-Z][a-z]+(?:\s+[A-Za-z]+){0,2})\.\s+([A-Z][a-z]+(?:\s+[A-Za-z]+){0,2})\."
-    )
-    fragments = [m.group(0) for m in frag_pattern.finditer(t)]
-
-    # --- 5. Vague "something" ---
-    something_vague = find_all(
-        r"\bsomething\s+(?:vast|ancient|wrong|broken|old|deep|huge|terrible|strange|else|more|like|in|about|that|he|she|they|it)\b",
-    )
-
-    # --- 6. Tricolons (rule of three) ---
-    # Three comma-separated single words or two-word phrases in a row, typically
-    # nouns or gerunds. Pattern: "word, word, and word" or "word, word, word"
-    tricolons = find_all(
-        r"(?<![\w])([A-Za-z]+(?:ing|ion|ce|ty|th|ness)?),\s+([A-Za-z]+(?:ing|ion|ce|ty|th|ness)?),\s+(?:and\s+)?([A-Za-z]+(?:ing|ion|ce|ty|th|ness)?)\b",
-    )
-    # Also catch fragment-tricolons: "Learning. Adapting. Refining."
-    frag_tricolons = find_all(
-        r"(?<=[.!?]\s)([A-Z][a-z]+)\.\s+([A-Z][a-z]+)\.\s+([A-Z][a-z]+)\.",
-    )
-
-    # --- 7. "Just" as dramatic minimizer ---
-    # "Just <verb>s." or "Just <noun>." at sentence start or after period.
-    just_minimizer = find_all(
-        r"(?:^|(?<=[.!?]\s))Just\s+[a-z][^.!?\n]{1,40}[.!?]",
-    )
-
-    # --- 8. Colon-based dramatic reveals ---
-    # Short clause followed by colon followed by short payload, mid-paragraph.
-    # e.g. "Worst part: improvement."  "His term for them: hollow folk."
-    colon_reveals = find_all(
-        r"(?:^|(?<=[.!?]\s))[A-Z][^.!?:\n]{1,40}:\s+[a-z][^.!?\n]{1,60}[.!?]",
-    )
-
-    # --- 9. "Rather than" constructions ---
-    rather_than = find_all(r"\brather\s+than\b")
-
-    # --- 10. Improvement-template / abstract critical vocab ---
-    # Only flags in narrative prose; your own editorial reports will trip these,
-    # but that's fine since you want to spot them anywhere.
-    abstract_praise = find_all(
-        r"\b(?:compelling|resonant|nuanced|remarkable|sophisticated|profound|poignant|evocative|masterful|genuine(?:ly)?)\b",
-    )
-    improvement_template = find_all(
-        r"\b(?:would\s+benefit\s+from|could\s+be\s+strengthened|consider\s+(?:adding|revising|rewriting)|might\s+help)\b",
-    )
-
-    counts = {
-        "em_dashes": len(em_dashes),
-        "negation_pivot": len(negation_pivot) + len(negation_stack) + len(wasnt_that),
-        "the_way_how": len(the_way) + len(how_framed),
-        "dramatic_fragments": len(fragments),
-        "vague_something": len(something_vague),
-        "tricolons": len(tricolons) + len(frag_tricolons),
-        "just_minimizer": len(just_minimizer),
-        "colon_reveals": len(colon_reveals),
-        "rather_than": len(rather_than),
-        "abstract_praise": len(abstract_praise),
-        "improvement_template": len(improvement_template),
-    }
-
-    # Composite score. Em dash in first paragraph is a hard fail: +50.
-    score = sum(counts.values())
-    if first_para_em_dash:
-        score += 50
-
-    # Representative examples (first two hits per category) for the judge.
-    examples = {
-        "em_dashes": em_dashes[:2],
-        "negation_pivot": (negation_pivot + negation_stack + wasnt_that)[:2],
-        "the_way_how": (the_way + how_framed)[:2],
-        "dramatic_fragments": fragments[:2],
-        "vague_something": something_vague[:2],
-        "tricolons": (tricolons + frag_tricolons)[:2],
-        "just_minimizer": just_minimizer[:2],
-        "colon_reveals": colon_reveals[:2],
-        "rather_than": rather_than[:2],
-        "abstract_praise": abstract_praise[:2],
-        "improvement_template": improvement_template[:2],
-    }
-
-    # Build human-readable report.
-    label_map = {
-        "em_dashes": "Em dashes",
-        "negation_pivot": "Negation pivots (not X but Y / Not X. Not Y. Z.)",
-        "the_way_how": '"The way..." / "how..." framing',
-        "dramatic_fragments": "Dramatic fragment pairs",
-        "vague_something": 'Vague "something"',
-        "tricolons": "Tricolons (rule of three)",
-        "just_minimizer": '"Just" as dramatic minimizer',
-        "colon_reveals": "Colon-based dramatic reveals",
-        "rather_than": '"Rather than" constructions',
-        "abstract_praise": "Abstract critical vocabulary",
-        "improvement_template": "Improvement-template phrases",
-    }
-
-    lines: List[str] = []
-    lines.append(f"Composite signature score: {score}")
-    if first_para_em_dash:
-        lines.append("HARD FAIL: em dash in first paragraph (+50).")
-    for key, label in label_map.items():
-        n = counts[key]
-        if n == 0:
+    transplants: List[dict] = []
+    for match in item_pattern.finditer(section):
+        draft_num = int(match.group(1))
+        if draft_num < 1 or draft_num > max_draft:
             continue
-        sample_list = examples[key]
-        if sample_list:
-            sample = " | ".join(
-                s.strip().replace("\n", " ")[:80] for s in sample_list if s
-            )
-            lines.append(f"- {label}: {n}  [e.g. {sample}]")
-        else:
-            lines.append(f"- {label}: {n}")
-    if len(lines) == 1:
-        lines.append("(no tells detected)")
+        body = match.group(2).strip()
 
-    return {
-        "score": score,
-        "counts": counts,
-        "examples": examples,
-        "first_para_em_dash": first_para_em_dash,
-        "report": "\n".join(lines),
-    }
+        # Extract the quoted text. Accept straight or curly quotes.
+        quote_match = re.search(r'["\u201c]([^"\u201d]+?)["\u201d]', body)
+        quote = quote_match.group(1).strip() if quote_match else ""
+
+        # Pull GRAFT INTO and WHY fields.
+        graft_match = re.search(
+            r"GRAFT\s+INTO\s*[:\-]\s*(.+?)(?=\n\s*WHY\s*[:\-]|\Z)",
+            body,
+            re.IGNORECASE | re.DOTALL,
+        )
+        graft_into = graft_match.group(1).strip() if graft_match else ""
+
+        why_match = re.search(
+            r"WHY\s*[:\-]\s*(.+?)\Z",
+            body,
+            re.IGNORECASE | re.DOTALL,
+        )
+        why = why_match.group(1).strip() if why_match else ""
+
+        # Only keep items that have a quote and at least one of graft/why.
+        if quote and (graft_into or why):
+            transplants.append(
+                {
+                    "source_draft": draft_num,
+                    "quote": quote,
+                    "graft_into": re.sub(r"\s+", " ", graft_into),
+                    "why": re.sub(r"\s+", " ", why),
+                }
+            )
+
+    return transplants
 
 
 def evaluate_drafts_with_anthropic(
@@ -789,15 +1061,9 @@ def evaluate_drafts_with_anthropic(
     client = anthropic.Anthropic(api_key=api_key)
 
     draft_blocks = []
-    scans: List[dict] = []
     for index, (_run_id, text) in enumerate(drafts, start=1):
-        scan = scan_ai_signatures(text)
-        scans.append(scan)
         draft_blocks.append(
-            f"DRAFT {index}\n"
-            f"SIGNATURE SCAN (mechanical pre-analysis, binding evidence):\n"
-            f"{scan['report']}\n\n"
-            f"--- draft text follows ---\n\n"
+            f"DRAFT {index}\n\n"
             f"{text.strip()}"
         )
 
@@ -831,7 +1097,7 @@ def evaluate_drafts_with_anthropic(
     resp = anthropic_messages_create_with_backoff(
         client,
         model=model.strip(),
-        max_tokens=4000,
+        max_tokens=6000,
         temperature=0,
         messages=[{"role": "user", "content": payload}],
         max_attempts=5,
@@ -846,6 +1112,15 @@ def evaluate_drafts_with_anthropic(
 
     winner_run_id = drafts[winner_index - 1][0]
     ranking_list = parse_ranking_list(raw_text, max_valid=len(drafts))
+    transplants = parse_transplants(raw_text, max_draft=len(drafts))
+
+    # Tag each transplant with the source run_id for downstream display/saving.
+    for tp in transplants:
+        src_idx = tp["source_draft"] - 1
+        if 0 <= src_idx < len(drafts):
+            tp["source_run_id"] = drafts[src_idx][0]
+        else:
+            tp["source_run_id"] = ""
 
     return {
         "winner_run_id": winner_run_id,
@@ -854,7 +1129,7 @@ def evaluate_drafts_with_anthropic(
         "raw_text": raw_text.strip(),
         "parse_status": parse_status,
         "model": model.strip(),
-        "scans": scans,
+        "transplants": transplants,
     }
 
 
@@ -961,6 +1236,11 @@ def main() -> None:
 
     csv_path = DATA_DIR / "runs.csv"
 
+    # GitHub sync: best-effort. If configured, pull the repo contents down on
+    # first render when the local CSV is empty. Failures are non-fatal.
+    github_cfg = load_github_config()
+    github_pull_on_startup_if_needed(github_cfg, csv_path)
+
     try:
         prompt_defs = load_prompt_definitions(PROMPTS_CSV)
     except Exception as exc:
@@ -1065,6 +1345,49 @@ def main() -> None:
             clear_all_run_data(csv_path, OUTPUTS_DIR)
             st.success("All stored run data was deleted. A new app session has started.")
             st.rerun()
+
+        st.markdown("---")
+        st.subheader("GitHub sync")
+        if github_cfg["configured"]:
+            st.caption(
+                f"Repo: `{github_cfg['repo']}` @ `{github_cfg['branch']}`  \n"
+                f"Credentials from: {github_cfg['source']}"
+            )
+            status = st.session_state.get(GITHUB_SYNC_STATUS_KEY)
+            if status:
+                msg = f"Last sync {status['timestamp']}: {status['message']}"
+                kind = status.get("kind", "info")
+                if kind == "error":
+                    st.error(msg)
+                elif kind == "warn":
+                    st.warning(msg)
+                elif kind == "success":
+                    st.success(msg)
+                else:
+                    st.info(msg)
+            else:
+                st.caption("No sync activity yet this session.")
+
+            col_pull, col_push = st.columns(2)
+            with col_pull:
+                if st.button("Pull from repo", help="Overwrite local files with the repo contents."):
+                    with st.spinner("Pulling from GitHub..."):
+                        github_pull_all(github_cfg)
+                    st.rerun()
+            with col_push:
+                if st.button("Push all local", help="Push every local file to the repo (best-effort)."):
+                    with st.spinner("Pushing to GitHub..."):
+                        all_local = [p for p in OUTPUTS_DIR.rglob("*") if p.is_file()]
+                        if csv_path.exists():
+                            all_local.insert(0, csv_path)
+                        github_push_paths(github_cfg, all_local, commit_prefix="manual push")
+                    st.rerun()
+        else:
+            st.caption(
+                "Not configured. To enable cross-device continuity, set "
+                "`GITHUB_TOKEN` and `GITHUB_REPO` (e.g. `user/chapters`) in "
+                "Streamlit secrets. `GITHUB_BRANCH` defaults to `main`."
+            )
 
     left, right = st.columns([1.15, 0.85])
 
@@ -1247,6 +1570,20 @@ def main() -> None:
                             st.session_state[CURRENT_SESSION_RUN_IDS_KEY].append(run_id)
                             st.session_state[LATEST_BATCH_RUN_IDS_KEY].append(run_id)
                             successes += 1
+
+                            # Best-effort push to GitHub. Never blocks on failure.
+                            if github_cfg["configured"]:
+                                try:
+                                    github_push_after_generation(
+                                        github_cfg,
+                                        csv_path=csv_path,
+                                        output_path=output_path,
+                                        payload_path=payload_path,
+                                        micro_prompt_path=micro_prompt_path,
+                                        meta_path=meta_path,
+                                    )
+                                except Exception as push_exc:
+                                    warnings.append(f"GitHub push failed: {push_exc}")
 
                         except Exception as exc:
                             failures.append(
@@ -1477,24 +1814,31 @@ def main() -> None:
                                         )
                                         ranked_rows.append((str(run_id_for_rank), rank_position))
 
-                                    # Persist per-draft signature scan results.
-                                    scans = result.get("scans") or []
-                                    scan_rows: List[Tuple[str, int, str]] = []
-                                    for idx, (draft_run_id, _) in enumerate(drafts):
-                                        if idx >= len(scans):
-                                            break
-                                        scan = scans[idx]
-                                        update_record(
-                                            csv_path,
-                                            str(draft_run_id),
-                                            {
-                                                "signature_score": int(scan["score"]),
-                                                "signature_report": scan["report"],
-                                            },
-                                        )
-                                        scan_rows.append(
-                                            (str(draft_run_id), int(scan["score"]), scan["report"])
-                                        )
+                                    # Build and save a transplants report alongside the winner.
+                                    transplants = result.get("transplants") or []
+                                    transplants_path: Optional[Path] = None
+                                    if transplants:
+                                        report_lines = [
+                                            f"Transplant candidates for winner: {winner_filename}",
+                                            f"Winner run_id: {winner_run_id}",
+                                            f"Evaluator: {result['model']}",
+                                            f"Evaluation id: {evaluation_id}",
+                                            "",
+                                            "=" * 70,
+                                            "",
+                                        ]
+                                        for i, tp in enumerate(transplants, start=1):
+                                            src_run = tp.get("source_run_id", "")
+                                            report_lines.append(f"{i}. FROM DRAFT {tp['source_draft']} (run {src_run})")
+                                            report_lines.append(f'   QUOTE: "{tp["quote"]}"')
+                                            if tp.get("graft_into"):
+                                                report_lines.append(f"   GRAFT INTO: {tp['graft_into']}")
+                                            if tp.get("why"):
+                                                report_lines.append(f"   WHY: {tp['why']}")
+                                            report_lines.append("")
+                                        transplants_filename = winner_filename.rsplit(".txt", 1)[0] + " Transplants.txt"
+                                        transplants_path = OUTPUTS_DIR / transplants_filename
+                                        save_text(transplants_path, "\n".join(report_lines))
 
                                     st.session_state["last_evaluation_result"] = {
                                         "evaluation_id": evaluation_id,
@@ -1508,7 +1852,8 @@ def main() -> None:
                                         "batch_run_ids": batch_run_id_list,
                                         "ranking": ranking,
                                         "ranked_rows": ranked_rows,
-                                        "scan_rows": scan_rows,
+                                        "transplants": transplants,
+                                        "transplants_file": str(transplants_path) if transplants_path else "",
                                     }
 
                                     st.success(
@@ -1517,6 +1862,18 @@ def main() -> None:
                                     )
                                     if result["parse_status"] != "clean":
                                         st.info(f"Raw evaluator response: {result['raw_text']!r}")
+
+                                    # Best-effort push of evaluation artifacts to GitHub.
+                                    if github_cfg["configured"]:
+                                        try:
+                                            github_push_after_evaluation(
+                                                github_cfg,
+                                                csv_path=csv_path,
+                                                winner_path=winner_path,
+                                                transplants_path=transplants_path,
+                                            )
+                                        except Exception as push_exc:
+                                            st.warning(f"GitHub push failed: {push_exc}")
 
                                 except Exception as eval_exc:
                                     st.error(f"Evaluation failed: {eval_exc}")
@@ -1534,26 +1891,40 @@ def main() -> None:
                 )
 
                 ranked_rows = last_eval.get("ranked_rows") or []
-                scan_rows = last_eval.get("scan_rows") or []
-                scan_lookup = {rid: (score, report) for rid, score, report in scan_rows}
+                transplants = last_eval.get("transplants") or []
 
                 if ranked_rows:
-                    rows_with_scores = []
-                    for rid, rank in ranked_rows:
-                        score, _ = scan_lookup.get(rid, ("", ""))
-                        rows_with_scores.append({"rank": rank, "run_id": rid, "sig_score": score})
-                    rank_df = pd.DataFrame(rows_with_scores)
+                    rank_df = pd.DataFrame(
+                        [{"rank": rank, "run_id": rid} for rid, rank in ranked_rows]
+                    )
                     rank_df = rank_df.sort_values("rank").reset_index(drop=True)
-                    st.markdown("**Ranking (best to worst) with signature scores:**")
+                    st.markdown("**Ranking (best to worst):**")
                     st.dataframe(rank_df, use_container_width=True, hide_index=True)
                 else:
                     st.caption("No ranking line was returned by the evaluator.")
 
-                if scan_rows:
-                    with st.expander("Signature scan details (per draft)", expanded=False):
-                        for rid, score, report in scan_rows:
-                            st.markdown(f"**Run `{rid}` — score {score}**")
-                            st.code(report, language=None)
+                if transplants:
+                    st.markdown(f"**Transplant candidates ({len(transplants)}):**")
+                    st.caption(
+                        "Lines from losing drafts the evaluator thinks could be grafted into the winner."
+                    )
+                    for i, tp in enumerate(transplants, start=1):
+                        src_run = tp.get("source_run_id", "")
+                        header = f"**{i}. From draft {tp['source_draft']}**"
+                        if src_run:
+                            header += f" — run `{src_run}`"
+                        st.markdown(header)
+                        st.markdown(f"> {tp['quote']}")
+                        if tp.get("graft_into"):
+                            st.markdown(f"*Graft into:* {tp['graft_into']}")
+                        if tp.get("why"):
+                            st.markdown(f"*Why:* {tp['why']}")
+                        st.markdown("")
+                    tp_file = last_eval.get("transplants_file") or ""
+                    if tp_file and Path(tp_file).exists():
+                        st.caption(f"Saved to: `{Path(tp_file).name}`")
+                else:
+                    st.caption("No transplant candidates proposed by the evaluator.")
 
                 with st.expander("Evaluator reasoning", expanded=True):
                     st.markdown(last_eval["raw_text"])

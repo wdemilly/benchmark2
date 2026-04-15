@@ -1,0 +1,79 @@
+RHYTHM PROFILE
+
+AUTHOR: Tessa Dare (source: The Duchess Deal, Chapters 1–4)
+
+SOURCE IMPRESSION: Dare's prose moves like a quick-witted person thinking aloud while doing something physical. The narrative voice sits inside the character's head and lets her judgments, asides, and small comic reversals push the sentences forward; observed action and interior commentary trade places without warning. Tempo is brisk and uneven — sentences sprint, stop short, regroup, then sprint again. Emotion is named when it lands and underplayed when it doesn't; the prose trusts the reader to enjoy the company of the protagonist's mind.
+
+
+RHYTHM PROFILE
+
+CORE MOVEMENT
+The prose advances by quick alternation between action and interior judgment. A scene moves a step, the character notices something or evaluates it, the scene moves another step. Pressure is built in short bursts rather than long crescendos: a paragraph will tighten through three or four quickening sentences and then cut to a fragment or a one-line aside that releases the tension into wit. The motion is rarely smooth; it pivots, often inside a single sentence, from external description to interior reaction. Resolution at the paragraph level tends to land on a comic beat, a self-correction, or a small turn of feeling — not a thematic chord. The overall effect is forward-leaning and conversational, with the character's mind audibly steering.
+
+SENTENCE RHYTHM
+Sentence length is wide-ranging and deliberately uneven. The default register is medium-short declaratives, with frequent very short sentences and occasional longer cumulative sentences that pile clauses by addition rather than subordination. Short sentences appear most often as accents after a longer one, or in clusters of two or three to mark a decision, a shock, or a comic stop ("Elegant. Enormous. Terrifying." / "Ready. Steady. Go."). Cluster fragments are real but local — they punctuate, they do not become the dominant texture.
+
+Long sentences in Dare are rarely periodic or balanced. They behave cumulatively: a base clause adds modifiers, then adds another, often slipping into the character's voice partway through ("all she had to do was square her shoulders, charge through the wrought-iron gates, march up those granite steps — really, there were only a hundred or so — and ring the bell…"). The aside inside the dash is doing real work: it pivots register from determined narration to wry self-talk.
+
+Sentences pivot mid-course often, frequently through em-dashes, parentheticals, or a sudden interior insertion. Clauses tend to correct themselves rather than accumulate symmetrically; an evaluation is offered, then revised, then settled. Endings land in three characteristic ways: hard on a fact ("She had to try."), tilted ironically ("Guilty as charged."), or carried forward into the next beat without ceremony. They rarely soften into lyric resolution.
+
+PARAGRAPH CADENCE
+Paragraphs commonly open with one of: a piece of action already underway, a judgment in the character's voice, or a piece of dialogue. Pure atmospheric openings are rare. Once underway, the paragraph typically braids three modes — external action, dialogue or quoted thought, and interior commentary — with quick switches between them. Build is usually short: three to six sentences of accumulation followed by a turn or a punchline.
+
+Endings tend to hook forward into the next beat, drop a comic deflation, or close on a specific physical fact rather than an abstract one. Aphoristic closes and thematic buttons are uncharacteristic. The prose prefers to end a paragraph slightly off-balance, in a way that pulls the eye to the next paragraph. Variety between consecutive paragraphs is high: a long braided paragraph will often be followed by a short one of two or three sentences — sometimes a single line of dialogue or a single interior beat. The contrast is deliberate and audible.
+
+INTERIORITY AND DISTANCE
+Narration sits very close to the point-of-view character — free indirect discourse is the default mode rather than a special effect. Interiority is continuous, not reserved: there is rarely a stretch of more than a few sentences without the character's evaluation, reaction, or wit surfacing. Thought arrives in two main forms — quick judging notes (often a sentence fragment or a single italic-style aside) and slightly longer reflective beats during pauses in action. Fuller reflection is short and pointed, not essayistic.
+
+Emotion is named directly when the moment is doing emotional work, and implied through selection of physical detail when the moment is doing comic or social work. The prose does not perform restraint; it performs candor. Cataloguing of physical sensation is used at high-pressure moments (gooseflesh, breath suspended, nerves jumping) and is allowed to be slightly over-the-top — the over-the-topness is part of the voice. Interpretation of events is brief and immediate; the prose almost never pulls back into authorial commentary above the character.
+
+DIALOGUE TEMPO
+Dialogue is fast, layered, and dramatically active. Exchanges generally move in short turns — one or two sentences per speaker — with longer speeches reserved for moments of declaration, argument, or comic excess. Speakers answer obliquely, deflect, escalate, and tease at least as often as they answer directly; the rhythm of the exchange is itself a pressure system, not a vehicle for information delivery.
+
+Narration interrupts speech often, but briefly: a single line of action or interior reaction inserted between turns to land a beat or shift register. Voices are distinguished as much by tempo and tactical posture (who pushes, who deflects, who cuts off) as by lexical markers. Tags are spare; reaction is more often carried by the next interior sentence than by an adverb on the tag. Dialogue tends to escalate or sharpen rather than meander — a scene's exchange usually ends with a turn of advantage or a comic deflation, not a fade.
+
+PRESSURE PATTERNS
+At the sentence level, pressure is built by accumulation of short clauses or by a sentence that begins normally and is interrupted by an aside. At the paragraph level, pressure is built by stacking three to five quickening sentences and then breaking the stack with a fragment, a one-line release, or a tonal switch (often into wit). High-pressure passages tend to compress — sentences shorten, clauses drop, fragments cluster — rather than expand into long lyrical sentences.
+
+Release is almost always immediate and audible: a single short sentence after density, a comic deflation after a serious beat, a physical detail after an emotional one. Emotional beats are usually prepared by a small physical or social anchor a sentence or two earlier and then landed plainly, often in the character's own register. Delay is rare; the prose does not luxuriate in deferral.
+
+REPETITION VS VARIATION
+Tolerated repetition: short anaphoric runs of two or three parallel sentences for a decision moment or a comic crescendo ("She'd walked… She'd refused… She'd found…"); fragment clusters of two to four for emphasis; brief noun-and-colon catalogues for snapshot description.
+
+Avoided repetition: the same sentence shape across consecutive paragraphs; sustained anaphora beyond a short cluster; balanced periodic sentences in a row; the same opening word across more than two or three sentences in close range; symmetrical triplets used as a structural habit.
+
+The author varies key very quickly. A device is used, then dropped; a parallel structure appears, then the next sentence breaks the parallel. What prevents the writing from going mechanical is the constant change of mode — from action to interior to dialogue to comic aside — inside short spans. A single mode is rarely allowed to dominate for long.
+
+RARE OR UNCHARACTERISTIC MOVES
+- Sustained atmospheric or scenic description without a character's voice present.
+- Long balanced periodic sentences with parallel subordinate clauses.
+- Aphoristic or thematic paragraph buttons — the closing-epigram cadence.
+- Repeated "the way X" framing as a habitual mode of observation.
+- Symmetrical triplets used as the structural rhythm of consecutive sentences.
+- Withheld or studied opacity about emotion when the moment calls for naming it.
+- Authorial commentary above the character's consciousness.
+- Long stretches of pure action without interior reaction.
+- Lyrical free-indirect drift unanchored to a specific physical or social object.
+- The "Not X. Not Y. Z." formula as a sentence rhythm.
+
+COMPOSITE GUIDANCE FOR DRAFTING
+- Favor close free indirect discourse. Let the character's judgment surface inside the narration within the first few sentences of every paragraph and recur throughout.
+- Vary sentence length aggressively within paragraphs. Mix short declaratives, mid-length action sentences, and the occasional cumulative sentence that adds clauses by addition.
+- Use fragment clusters as accents, not as texture. Two to four fragments for a decision, a shock, or a comic stop — then return to full sentences.
+- Let sentences pivot mid-course. Use em-dashes, parentheticals, or a sudden interior insertion to switch register from external observation to wry self-talk. Earn the dash; do not avoid it.
+- Open paragraphs on action already underway, on a judgment, or on dialogue. Avoid scenic or weather openings.
+- Braid modes inside paragraphs — external action, dialogue, interior commentary — and switch between them in short spans.
+- Land paragraph endings on a fact, a comic deflation, or a forward hook. Avoid aphoristic or thematic close-outs.
+- Keep dialogue turns short and dramatically active. Let speakers deflect, push, or sharpen as often as they answer. Place a single line of interior reaction between turns where it will land a beat.
+- Name emotion directly when the moment is doing emotional work. Imply it through selection of detail when the moment is doing comic or social work. Do not perform restraint as a default.
+- Build pressure by compression: shorten sentences, drop clauses, cluster fragments. Release immediately on the other side with a short sentence or a tonal switch.
+- Vary sentence shape from one paragraph to the next. A long braided paragraph should be followed by a short one. Do not let the same shape carry across consecutive paragraphs.
+- Use parallel structures briefly and then break them. A short anaphoric run of two or three is permitted; a fourth begins to feel mechanical.
+- Anchor every interior beat to a physical or social object. Pure abstraction is uncharacteristic.
+- Allow comic exaggeration in the character's voice. Catalogues of physical reaction may be slightly over-the-top; that is part of the register, not a failure of restraint.
+- Avoid: long balanced periodic sentences in a row; repeated "the way X" framing; aphoristic chapter or paragraph buttons; "Not X. Not Y. Z." patterning; sustained interiority unanchored to action.
+
+ANTI-MECHANICAL SAFETY NOTE
+This profile describes tendencies, not templates. The author's rhythm derives most of its life from variation — from the constant change of mode, length, and register inside short spans. Applying any single feature systematically (regular fragment clusters, alternating long-then-short paragraphs, em-dashes at fixed intervals, anaphoric triplets every few beats) will produce a detectable cadence band that reads as parody rather than voice. The fragment clusters are accents and must remain occasional; the cumulative sentence is a tool, not a default; the comic deflation is one possible paragraph close among several.
+
+Do not force patterned alternation. Do not reproduce the same sentence shape across consecutive paragraphs even when each shape is individually faithful to the source. Do not treat the em-dash as a metric to hit. The test for a successful draft is whether a reader could open to any two consecutive paragraphs and find that the cadence has shifted in some way — length, opening mode, ending mode, mix of action and interior, or pressure curve. If those two paragraphs feel the same, the rhythm has gone mechanical and the next paragraph must break the pattern.

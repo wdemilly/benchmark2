@@ -611,13 +611,13 @@ def github_push_paths(cfg: dict, local_paths: List[Path], commit_prefix: str) ->
         else:
             result["failed"] += 1
 
-    if result["pushed"] or result["failed"]:
-        kind = "success" if result["failed"] == 0 else "warn"
+    if result["failed"] == 0 and result["pushed"]:
         _gh_record_status(
-            f"Pushed {result['pushed']} file(s) to {cfg['repo']}"
-            + (f" ({result['failed']} failed)" if result["failed"] else ""),
-            kind=kind,
+            f"Pushed {result['pushed']} file(s) to {cfg['repo']}",
+            kind="success",
         )
+    # On failure, leave the per-file error message in place so the HTTP
+    # status code (401/403/404/422) remains visible in the sidebar.
     return result
 
 
@@ -837,12 +837,24 @@ def anthropic_messages_create_with_backoff(
 
     for attempt in range(1, max_attempts + 1):
         try:
-            return client.messages.create(
+            # Use the streaming API instead of the blocking create() call.
+            # Streaming yields control between chunks, which lets Streamlit's
+            # main thread answer the Cloud health checker (/healthz). The
+            # blocking call could hold the thread for 60-120 seconds at a
+            # time, causing enough missed health checks that the orchestrator
+            # rebooted the container mid-batch. The returned object has the
+            # same shape as messages.create()'s return, so every downstream
+            # caller (extract_text_from_response, get_usage_tokens,
+            # getattr(resp, "stop_reason"), etc.) keeps working unchanged.
+            with client.messages.stream(
                 model=model,
                 max_tokens=max_tokens,
                 temperature=temperature,
                 messages=messages,
-            )
+            ) as stream:
+                for _ in stream.text_stream:
+                    pass
+                return stream.get_final_message()
         except Exception as exc:
             last_exc = exc
             message = str(exc).lower()

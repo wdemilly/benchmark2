@@ -21,16 +21,6 @@ try:
 except Exception:
     anthropic = None
 
-# --- Spec scanner integration (Tessa Dare mechanical drafting spec) ---
-try:
-    from scanner import load_spec, run_scan, summarize_pass_fail, fail_count  # type: ignore
-except Exception:
-    load_spec = None
-    run_scan = None
-    summarize_pass_fail = None
-    fail_count = None
-# --- end spec scanner integration ---
-
 APP_TITLE = "Micro-Prompt Harness"
 DATA_DIR = Path("micro_prompt_runs")
 DATA_DIR.mkdir(exist_ok=True)
@@ -47,7 +37,6 @@ MAX_CONTINUATIONS = 4
 PROMPTS_CSV = Path("prompts.csv")
 REPO_SOURCE_PATH = "reference/source.txt"
 REPO_PROFILES_PATH = "reference/profiles.txt"
-REPO_RHYTHM_PATH = "reference/rhythm_profile.txt"
 CURRENT_SESSION_KEY = "app_session_id"
 CURRENT_SESSION_RUN_IDS_KEY = "app_session_run_ids"
 LATEST_BATCH_RUN_IDS_KEY = "app_latest_batch_run_ids"
@@ -169,7 +158,6 @@ class RunRecord:
     payload_file: str
     micro_prompt_file: str
     meta_file: str
-    rhythm_name: str = ""
     output_sha256: str = ""
     stop_reason: str = ""
     input_tokens: Optional[int] = None
@@ -186,8 +174,6 @@ class RunRecord:
     originality_score: Optional[float] = None
     manual_rating: str = ""
     manual_notes: str = ""
-    signature_score: Optional[int] = None
-    signature_report: str = ""
 
 
 def load_prompt_definitions(csv_path: Path) -> List[dict]:
@@ -694,7 +680,6 @@ def load_records(csv_path: Path) -> pd.DataFrame:
         "source_name",
         "outline_name",
         "profiles_name",
-        "rhythm_name",
         "file_stub",
         "output_file",
         "payload_file",
@@ -709,7 +694,6 @@ def load_records(csv_path: Path) -> pd.DataFrame:
         "originality_label",
         "manual_rating",
         "manual_notes",
-        "signature_report",
     ]
 
     bool_columns = [
@@ -728,7 +712,6 @@ def load_records(csv_path: Path) -> pd.DataFrame:
         "output_words",
         "originality_score",
         "evaluation_rank",
-        "signature_score",
     ]
 
     if csv_path.exists():
@@ -802,7 +785,6 @@ def build_payload(
     source_text: str,
     outline_text: str,
     profiles_text: str,
-    rhythm_text: str = "",
 ) -> str:
     parts = [
         "BASE PROMPT",
@@ -826,48 +808,10 @@ def build_payload(
             profiles_text.strip(),
             "END CHARACTER PROFILES",
         ])
-    if rhythm_text.strip():
-        parts.extend([
-            "",
-            "BEGIN RHYTHM PROFILE",
-            rhythm_text.strip(),
-            "END RHYTHM PROFILE",
-        ])
-        parts.extend([
-            "",
-            "DRAFTING INSTRUCTIONS",
-            (
-                "Use the RHYTHM PROFILE above as the operational guide for prose "
-                "movement: sentence cadence, pressure and release, paragraph "
-                "behavior, dialogue tempo, and the placement of interiority. "
-                "Follow its movement tendencies, not its wording. Do not borrow "
-                "phrases, sentence templates, ornaments, or stylistic residue "
-                "from the source author or from the rhythm profile examples. "
-                "The rhythm profile is a positive guide to how prose moves; it "
-                "is not a phrase bank.\n\n"
-                "Treat any anti-AI-signature controls in the OUTLINE as "
-                "guardrails only. They exist to prevent drift into generic "
-                "model prose. They are not the engine of the writing. Do not "
-                "write in a detector-conscious way. If avoiding a banned "
-                "pattern would force stiff, mechanical counter-patterning, "
-                "return to the source author's natural habits instead. If a "
-                "sentence begins to feel built to satisfy a pattern rather "
-                "than to carry the scene, rewrite it.\n\n"
-                "When the outline's restrictions and the source author's "
-                "natural movement appear to compete, prefer the source "
-                "author's cadence. Freshness matters more than polish; "
-                "invisible rhythmic influence is better than obvious "
-                "stylistic imitation. Prefer living prose over obedient "
-                "prose.\n\n"
-                "Write the full chapter now. Return plain text only, with "
-                "normal paragraph breaks and no commentary."
-            ),
-        ])
-    else:
-        parts.extend([
-            "",
-            "Write the full chapter now. Return plain text only, with normal paragraph breaks and no commentary."
-        ])
+    parts.extend([
+        "",
+        "Write the full chapter now. Return plain text only, with normal paragraph breaks and no commentary."
+    ])
     return "\n".join(parts)
 
 
@@ -1625,11 +1569,9 @@ def main() -> None:
         source_text = ""
         outline_text = ""
         profiles_text = ""
-        rhythm_text = ""
         source_name = ""
         outline_name = ""
         profiles_name = ""
-        rhythm_name = ""
 
         # --- Source texts: repo or upload ---
         source_mode = st.radio(
@@ -1689,38 +1631,6 @@ def main() -> None:
                 st.info(f"Loaded profiles: {profiles_name}")
         # else: profiles_mode == "None" -- leave profiles_text empty
 
-        # --- Rhythm profile: repo, upload, or none ---
-        rhythm_mode = st.radio(
-            "Rhythm profile (positive style guide)",
-            options=["Use repo version", "Upload file", "None"],
-            index=0,
-            horizontal=True,
-            key="rhythm_mode",
-            help=(
-                "A separate text file describing the source author's prose "
-                "movement (cadence, pressure/release, paragraph behavior, "
-                "dialogue tempo). Used in the drafting prompt as a positive "
-                "cadence guide. The outline's anti-AI-signature rules continue "
-                "to act as guardrails only."
-            ),
-        )
-        if rhythm_mode == "Use repo version":
-            rhythm_text, rhythm_status = load_repo_text_cached(github_cfg, REPO_RHYTHM_PATH)
-            if rhythm_text:
-                rhythm_name = REPO_RHYTHM_PATH
-                st.info(rhythm_status)
-            else:
-                st.warning(rhythm_status + " Switch to 'Upload file' or 'None'.")
-        elif rhythm_mode == "Upload file":
-            uploaded_rhythm = st.file_uploader(
-                "Upload rhythm profile (.txt/.md)", type=["txt", "md"], key="rhythm"
-            )
-            if uploaded_rhythm is not None:
-                rhythm_name = uploaded_rhythm.name
-                rhythm_text = decode_uploaded_text(uploaded_rhythm)
-                st.info(f"Loaded rhythm profile: {rhythm_name}")
-        # else: rhythm_mode == "None" -- leave rhythm_text empty
-
         st.markdown("### Prompt set")
         df_prompts = pd.DataFrame(prompt_defs)
         st.dataframe(df_prompts, use_container_width=True, hide_index=True)
@@ -1763,7 +1673,6 @@ def main() -> None:
                         source_text=source_text,
                         outline_text=outline_text,
                         profiles_text=profiles_text,
-                        rhythm_text=rhythm_text,
                     )
 
                     for temperature in temperatures:
@@ -1823,7 +1732,6 @@ def main() -> None:
                                 "source_name": source_name,
                                 "outline_name": outline_name,
                                 "profiles_name": profiles_name,
-                                "rhythm_name": rhythm_name,
                                 "file_stub": file_stub,
                                 "payload_file": str(payload_path),
                                 "output_file": str(output_path),
@@ -1856,7 +1764,6 @@ def main() -> None:
                                     source_name=source_name,
                                     outline_name=outline_name,
                                     profiles_name=profiles_name,
-                                    rhythm_name=rhythm_name,
                                     file_stub=file_stub,
                                     output_file=str(output_path),
                                     payload_file=str(payload_path),
@@ -1995,22 +1902,6 @@ def main() -> None:
                     st.markdown(f"### {label}")
                     content = Path(path_str).read_text(encoding="utf-8")
                     st.text_area(f"{label} preview", value=content, height=320, key=f"preview_{label}_{selected_run}")
-                    # --- Spec scan: run on Output text only ---
-                    if label == "Output" and load_spec is not None:
-                        spec_path = Path("dare.toml")
-                        if spec_path.exists():
-                            try:
-                                spec = load_spec(str(spec_path))
-                                scan = run_scan(content, spec)
-                                rows = summarize_pass_fail(scan)
-                                scan_df = pd.DataFrame(rows, columns=["Axis", "Value", "Status"])
-                                fails = fail_count(rows)
-                                author = spec.get("meta", {}).get("author", "spec")
-                                with st.expander(f"Spec scan ({author}) - {fails} failures", expanded=False):
-                                    st.dataframe(scan_df, use_container_width=True, hide_index=True)
-                            except Exception as exc:
-                                st.caption(f"Spec scan unavailable: {exc}")
-                    # --- end spec scan ---
 
             st.markdown("### Selected run metadata")
             st.json({

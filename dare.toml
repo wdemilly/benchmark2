@@ -1,0 +1,70 @@
+# Tessa Dare drafting spec
+# Source: The Duchess Deal, Chapters 1-4 (4,687 words, 409 sentences, 24 paragraphs)
+# All numeric targets calibrated from this sample. Treat as targets, not laws.
+
+[meta]
+author = "Tessa Dare"
+source = "The Duchess Deal Ch 1-4"
+sample_words = 4687
+sample_sentences = 409
+sample_paragraphs = 24
+
+[sentence_length]
+# Source mean: 11.5 words/sentence
+# Source distribution: frag 12.2%, short 28.4%, mid-short 32.5%,
+#                      mid-long 18.1%, long 8.3%, very-long 0.5%
+mean_min = 10.0
+mean_max = 13.0
+fragments_pct_min = 8
+fragments_pct_max = 18
+very_long_pct_max = 2.0
+
+[em_dash]
+# Source: 7.9 per 1000 words. Outline currently says "very sparing".
+# Two coherent options. Pick one. Do not split.
+mode = "outline_faithful"   # change to "source_faithful" to flip
+# outline_faithful targets:
+target_per_1000 = [0, 2]
+hard_cap_per_1000 = 3
+# source_faithful targets (uncomment to use):
+# target_per_1000 = [6, 9]
+# hard_cap_per_1000 = 12
+no_consecutive_em_sentences = true
+
+[fragment_clusters]
+# Source: 7 clusters; lengths 2,2,2,2,3,4,5
+max_run_length = 5
+target_count_per_4000_words = [5, 7]
+no_consecutive_paragraph_clusters = true
+
+[anaphora]
+# Source: max run length 3; most runs were length 2
+max_run = 3
+max_runs_per_chapter = 2
+
+[paragraphs]
+# Source: 9 to 724 words, mean 200; wide variance is the signature
+short_under_50_min_count = 3
+long_over_250_min_count = 2
+consecutive_variance_min_pct = 25
+max_consecutive_in_default_band = 2  # 100-250 word band
+
+[banned_patterns]
+# Source: each ~0 in 4,687 words
+the_way = 0
+not_but = 0
+not_x_not_y = 0
+
+[caps]
+# Source: semis=2, colons=8, adverb-loaded tags rare, parens rare
+semicolons = 3
+colons = 6
+adverb_tags = 2
+parentheticals = 4
+italics_thought = 6
+
+[dialogue]
+short_turn_pct_min = 70
+short_turn_word_max = 15
+long_turn_word_threshold = 40
+long_turn_max_per_scene = 1

@@ -21,6 +21,16 @@ try:
 except Exception:
     anthropic = None
 
+# --- Spec scanner integration (Tessa Dare mechanical drafting spec) ---
+try:
+    from scanner import load_spec, run_scan, summarize_pass_fail, fail_count  # type: ignore
+except Exception:
+    load_spec = None
+    run_scan = None
+    summarize_pass_fail = None
+    fail_count = None
+# --- end spec scanner integration ---
+
 APP_TITLE = "Micro-Prompt Harness"
 DATA_DIR = Path("micro_prompt_runs")
 DATA_DIR.mkdir(exist_ok=True)
@@ -1985,6 +1995,22 @@ def main() -> None:
                     st.markdown(f"### {label}")
                     content = Path(path_str).read_text(encoding="utf-8")
                     st.text_area(f"{label} preview", value=content, height=320, key=f"preview_{label}_{selected_run}")
+                    # --- Spec scan: run on Output text only ---
+                    if label == "Output" and load_spec is not None:
+                        spec_path = Path("dare.toml")
+                        if spec_path.exists():
+                            try:
+                                spec = load_spec(str(spec_path))
+                                scan = run_scan(content, spec)
+                                rows = summarize_pass_fail(scan)
+                                scan_df = pd.DataFrame(rows, columns=["Axis", "Value", "Status"])
+                                fails = fail_count(rows)
+                                author = spec.get("meta", {}).get("author", "spec")
+                                with st.expander(f"Spec scan ({author}) - {fails} failures", expanded=False):
+                                    st.dataframe(scan_df, use_container_width=True, hide_index=True)
+                            except Exception as exc:
+                                st.caption(f"Spec scan unavailable: {exc}")
+                    # --- end spec scan ---
 
             st.markdown("### Selected run metadata")
             st.json({

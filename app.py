@@ -1638,7 +1638,7 @@ def main() -> None:
         selected_ids = st.multiselect(
             "Select prompt IDs to run",
             options=[p["id"] for p in prompt_defs],
-            default=[1, 2, 6, 10, 14, 16, 19, 21, 28],
+            default=[p["id"] for p in prompt_defs],
         )
 
         run_selected = st.button("Run selected prompts", type="primary")

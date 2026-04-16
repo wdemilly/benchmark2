@@ -46,7 +46,7 @@ OUTPUTS_DIR = RUNS_DIR / "flat_outputs"
 CSV_FILENAME = "runs.csv"
 PROMPTS_CSV = "prompts.csv"
 
-DEFAULT_GEN_MODEL = "claude-opus-4-6"
+DEFAULT_GEN_MODEL = "claude-opus-4-7"
 DEFAULT_EVAL_MODEL = "claude-sonnet-4-5"
 MAX_GEN_TOKENS = 16000
 MAX_EVAL_TOKENS = 6000
@@ -233,9 +233,8 @@ def load_prompts() -> pd.DataFrame:
 # ============================================================================
 
 SYSTEM_PROMPT = (
-    "You are an expert novelist. Follow the user's instructions exactly. "
-    "The user will provide an outline, a source text for voice, and character profiles. "
-    "Write the chapter they ask for. Do not add commentary, headers, or meta-text."
+    "Follow the user's instructions exactly. "
+    "Do not add commentary, headers, or meta-text to your response."
 )
 
 

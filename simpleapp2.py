@@ -65,7 +65,7 @@ Rank them according to the elements of good writing, as a developmental editor a
 - Premise delivery: Does the chapter establish clear stakes and a promise to the reader?
 - Plot and scene logic: Does the chapter move with causality and escalation? Do scenes earn their place?
 - Characters: Do characters have desire lines, agency, and dimensionality? Can you tell them apart?
-- IMPORTANT: Dialogue: Does it carry voice distinction, subtext, tension, and utility — or is it polite, flat, expository, and interchangeable?
+- Dialogue: Does it carry voice distinction, subtext, tension, and utility — or is it polite, expository, and interchangeable?
 - Prose style: Clarity, rhythm, diction, consistency. Does the prose serve the story or perform for its own sake?
 - Pacing: Momentum, scene length, transitions. Does the chapter earn its length or does it sag?
 - Setting: Atmosphere through specificity and integration with action — not scenic painting.
@@ -229,10 +229,18 @@ def load_prompts() -> pd.DataFrame:
 
 
 # ============================================================================
-# Payload construction — minimal
+# Payload construction — multi-block for API, flat string for saved file
 # ============================================================================
 
-def build_payload(prompt_text: str, doc_texts: dict[str, str]) -> str:
+SYSTEM_PROMPT = (
+    "You are an expert novelist. Follow the user's instructions exactly. "
+    "The user will provide an outline, a source text for voice, and character profiles. "
+    "Write the chapter they ask for. Do not add commentary, headers, or meta-text."
+)
+
+
+def build_payload_text(prompt_text: str, doc_texts: dict[str, str]) -> str:
+    """Flat string version saved to disk so you can see exactly what was sent."""
     parts = [prompt_text.strip()]
     for label, text in doc_texts.items():
         if text.strip():
@@ -244,16 +252,45 @@ def build_payload(prompt_text: str, doc_texts: dict[str, str]) -> str:
     return "\n".join(parts)
 
 
+def build_message_blocks(prompt_text: str, doc_texts: dict[str, str]) -> list[dict]:
+    """Multi-block content array for the API call.
+
+    Each document is a separate text block with a label, mirroring how the
+    browser handles uploaded files as discrete objects rather than one
+    concatenated string.
+    """
+    blocks = [{"type": "text", "text": prompt_text.strip()}]
+
+    for label, text in doc_texts.items():
+        if text.strip():
+            blocks.append({
+                "type": "text",
+                "text": f"[{label.upper()}]\n\n{text.strip()}",
+            })
+
+    blocks.append({
+        "type": "text",
+        "text": (
+            "Write the full chapter now. Return plain text only, "
+            "with normal paragraph breaks and no commentary."
+        ),
+    })
+    return blocks
+
+
 # ============================================================================
 # Generation
 # ============================================================================
 
-def generate_chapter(client, model: str, temperature: float, payload: str) -> str:
+def generate_chapter(
+    client, model: str, temperature: float, message_blocks: list[dict],
+) -> str:
     resp = client.messages.create(
         model=model,
         max_tokens=MAX_GEN_TOKENS,
         temperature=temperature,
-        messages=[{"role": "user", "content": payload}],
+        system=SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": message_blocks}],
     )
     return "\n".join(b.text for b in resp.content if getattr(b, "text", None))
 
@@ -681,7 +718,7 @@ with st.sidebar:
     st.markdown("---")
 
     # Temperature
-    temps_input = st.text_input("Temperatures (comma-separated)", value="0.6, 0.7")
+    temps_input = st.text_input("Temperatures (comma-separated)", value="1.0")
     try:
         temperatures = [float(t.strip()) for t in temps_input.split(",") if t.strip()]
     except ValueError:
@@ -785,15 +822,16 @@ with left_col:
                     run_count += 1
                     status.info(f"Run {run_count}/{total_runs}: P{pid} T{temp} R{rep:02d}")
 
-                    payload = build_payload(prompt_text, doc_uploads)
+                    payload_text = build_payload_text(prompt_text, doc_uploads)
+                    message_blocks = build_message_blocks(prompt_text, doc_uploads)
                     stub = make_file_stub(pid, temp, gen_model)
                     run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:20]
 
                     payload_path = OUTPUTS_DIR / f"{stub}_payload.txt"
-                    save_text(payload_path, payload)
+                    save_text(payload_path, payload_text)
 
                     try:
-                        output = generate_chapter(client, gen_model, temp, payload)
+                        output = generate_chapter(client, gen_model, temp, message_blocks)
                     except Exception as e:
                         st.error(f"Generation failed for P{pid} T{temp} R{rep}: {e}")
                         continue

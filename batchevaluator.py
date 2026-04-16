@@ -39,7 +39,7 @@ MIN_BATCH_SIZE = 5
 MAX_BATCH_SIZE = 25
 DEFAULT_TOP_K = 2            # how many to keep from each batch for finals
 MAX_OUTPUT_TOKENS = 6000
-TEMPERATURE = 0.3
+TEMPERATURE = 0
 
 
 # ============================================================================

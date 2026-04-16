@@ -808,78 +808,107 @@ with left_col:
 
     # Generate button
     if st.button("Generate", type="primary", disabled=not api_key or total_runs == 0):
-        client = anthropic.Anthropic(api_key=api_key)
-        progress = st.progress(0.0)
-        status = st.empty()
-        run_count = 0
+        # Pre-flight checks
+        problems = []
+        if not api_key:
+            problems.append("No API key set.")
+        if not selected_ids:
+            problems.append("No prompts selected.")
+        if not temperatures:
+            problems.append("No temperatures set.")
+        if not doc_uploads:
+            problems.append("No documents uploaded. The model needs at least the Outline and Source text.")
+        else:
+            if "Outline" not in doc_uploads:
+                problems.append("Outline not uploaded. The prompt references it.")
+            if "Source Text" not in doc_uploads:
+                problems.append("Source text not uploaded. The prompt references it.")
 
+        # Check that selected prompts have non-empty text
         for pid in selected_ids:
-            prompt_row = prompts_df[prompts_df["id"].astype(int) == pid].iloc[0]
-            prompt_text = str(prompt_row["text"])
+            row = prompts_df[prompts_df["id"].astype(int) == pid].iloc[0]
+            txt = str(row["text"]).strip()
+            if not txt or txt == "nan":
+                problems.append(f"P{pid} has no prompt text (empty or NaN in prompts.csv).")
 
-            for temp in temperatures:
-                for rep in range(1, repetitions + 1):
-                    run_count += 1
-                    status.info(f"Run {run_count}/{total_runs}: P{pid} T{temp} R{rep:02d}")
+        if problems:
+            st.error("**Cannot generate — fix these first:**")
+            for p in problems:
+                st.warning(p)
+        else:
+            client = anthropic.Anthropic(api_key=api_key)
+            progress = st.progress(0.0)
+            status = st.empty()
+            run_count = 0
 
-                    payload_text = build_payload_text(prompt_text, doc_uploads)
-                    message_blocks = build_message_blocks(prompt_text, doc_uploads)
-                    stub = make_file_stub(pid, temp, gen_model)
-                    run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:20]
+            for pid in selected_ids:
+                prompt_row = prompts_df[prompts_df["id"].astype(int) == pid].iloc[0]
+                prompt_text = str(prompt_row["text"])
 
-                    payload_path = OUTPUTS_DIR / f"{stub}_payload.txt"
-                    save_text(payload_path, payload_text)
+                for temp in temperatures:
+                    for rep in range(1, repetitions + 1):
+                        run_count += 1
+                        status.info(f"Run {run_count}/{total_runs}: P{pid} T{temp} R{rep:02d}")
 
-                    try:
-                        output = generate_chapter(client, gen_model, temp, message_blocks)
-                    except Exception as e:
-                        st.error(f"Generation failed for P{pid} T{temp} R{rep}: {e}")
-                        continue
+                        payload_text = build_payload_text(prompt_text, doc_uploads)
+                        message_blocks = build_message_blocks(prompt_text, doc_uploads)
+                        stub = make_file_stub(pid, temp, gen_model)
+                        run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:20]
 
-                    output_path = OUTPUTS_DIR / f"{stub}_output.txt"
-                    save_text(output_path, output)
+                        payload_path = OUTPUTS_DIR / f"{stub}_payload.txt"
+                        save_text(payload_path, payload_text)
 
-                    meta = {
-                        "run_id": run_id,
-                        "prompt_id": pid,
-                        "temperature": temp,
-                        "model": gen_model,
-                        "repetition": rep,
-                        "timestamp": datetime.now().isoformat(),
-                        "documents": list(doc_uploads.keys()),
-                    }
-                    meta_path = OUTPUTS_DIR / f"{stub}_meta.json"
-                    save_text(meta_path, json.dumps(meta, indent=2))
-
-                    record = RunRecord(
-                        run_id=run_id,
-                        timestamp=datetime.now().isoformat(),
-                        prompt_id=pid,
-                        prompt_text=prompt_text[:200],
-                        temperature=temp,
-                        model=gen_model,
-                        output_file=str(output_path),
-                        payload_file=str(payload_path),
-                        meta_file=str(meta_path),
-                        word_count=len(output.split()),
-                    )
-                    append_record(csv_path, record)
-
-                    # Push to GitHub
-                    if github_cfg["configured"]:
                         try:
-                            github_push_after_generation(
-                                github_cfg, csv_path, output_path, payload_path, meta_path,
-                            )
-                        except Exception as push_exc:
-                            st.warning(f"GitHub push failed: {push_exc}")
+                            output = generate_chapter(client, gen_model, temp, message_blocks)
+                        except Exception as e:
+                            st.error(f"Generation failed for P{pid} T{temp} R{rep}: {e}")
+                            continue
 
-                    progress.progress(run_count / total_runs)
-                    time.sleep(0.5)
+                        output_path = OUTPUTS_DIR / f"{stub}_output.txt"
+                        save_text(output_path, output)
 
-        progress.empty()
-        status.success(f"Done. {run_count} drafts generated.")
-        st.rerun()
+                        meta = {
+                            "run_id": run_id,
+                            "prompt_id": pid,
+                            "temperature": temp,
+                            "model": gen_model,
+                            "repetition": rep,
+                            "timestamp": datetime.now().isoformat(),
+                            "documents": list(doc_uploads.keys()),
+                        }
+                        meta_path = OUTPUTS_DIR / f"{stub}_meta.json"
+                        save_text(meta_path, json.dumps(meta, indent=2))
+
+                        record = RunRecord(
+                            run_id=run_id,
+                            timestamp=datetime.now().isoformat(),
+                            prompt_id=pid,
+                            prompt_text=prompt_text[:200],
+                            temperature=temp,
+                            model=gen_model,
+                            output_file=str(output_path),
+                            payload_file=str(payload_path),
+                            meta_file=str(meta_path),
+                            word_count=len(output.split()),
+                        )
+                        append_record(csv_path, record)
+
+                        # Push to GitHub
+                        if github_cfg["configured"]:
+                            try:
+                                github_push_after_generation(
+                                    github_cfg, csv_path, output_path, payload_path, meta_path,
+                                )
+                            except Exception as push_exc:
+                                st.warning(f"GitHub push failed: {push_exc}")
+
+                        progress.progress(run_count / total_runs)
+                        time.sleep(0.5)
+
+            progress.empty()
+            status.success(f"Done. {run_count} drafts generated.")
+            st.session_state["last_batch_size"] = total_runs
+            st.rerun()
 
 
 with right_col:
@@ -899,7 +928,9 @@ with right_col:
         st.subheader("Evaluate")
 
         max_eval = min(25, len(df))
-        eval_count = st.slider("Drafts to evaluate (most recent N)", 2, max_eval, min(12, max_eval))
+        last_batch = st.session_state.get("last_batch_size", None)
+        default_eval = min(last_batch, max_eval) if last_batch else min(12, max_eval)
+        eval_count = st.slider("Drafts to evaluate (most recent N)", 2, max_eval, default_eval)
 
         if st.button("Evaluate", type="primary", disabled=not api_key):
             client = anthropic.Anthropic(api_key=api_key)

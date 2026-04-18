@@ -614,7 +614,6 @@ def evaluate_drafts_with_anthropic(
     resp = client.messages.create(
         model=model,
         max_tokens=MAX_EVAL_TOKENS,
-        temperature=0,
         messages=[{"role": "user", "content": "".join(parts)}],
     )
     raw = "\n".join(b.text for b in resp.content if getattr(b, "text", None))
@@ -705,7 +704,6 @@ def evaluate_rubric_compliance(
     resp = client.messages.create(
         model=model,
         max_tokens=MAX_EVAL_TOKENS,
-        temperature=0,
         messages=[{"role": "user", "content": "".join(parts)}],
     )
     raw = "\n".join(b.text for b in resp.content if getattr(b, "text", None))
@@ -762,7 +760,6 @@ def graft_chapter(
     resp = client.messages.create(
         model=model,
         max_tokens=MAX_GRAFT_TOKENS,
-        temperature=0.3,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": prompt}],
     )

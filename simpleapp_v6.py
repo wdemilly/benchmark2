@@ -55,7 +55,7 @@ CSV_FILENAME = "runs.csv"
 PROMPTS_CSV = "prompts.csv"
 
 DEFAULT_GEN_MODEL = "claude-opus-4-7"
-DEFAULT_EVAL_MODEL = "claude-sonnet-4-5"
+DEFAULT_EVAL_MODEL = "claude-opus-4-6"
 DEFAULT_GRAFT_MODEL = "claude-opus-4-7"
 MAX_GEN_TOKENS = 16000
 MAX_EVAL_TOKENS = 8000
@@ -1797,5 +1797,44 @@ with right_col:
                     f"Download {batch_stub}.csv",
                     data=csv_buf.getvalue(),
                     file_name=f"{batch_stub}.csv",
+                    mime="text/csv",
+                )
+        else:
+            # No pipeline result in session — offer download of most recent batch
+            st.markdown("---")
+
+            # Try to find the most recent batch from FINAL_DIR
+            batch_paths = []
+            if FINAL_DIR.exists():
+                for p in sorted(FINAL_DIR.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+                    if p.is_file():
+                        batch_paths.append(p)
+
+            # Also include the most recent N output files
+            last_n = st.session_state.get("last_batch_size", 4)
+            recent_df = df.tail(last_n).copy()
+            output_paths = []
+            for _, row in recent_df.iterrows():
+                op = Path(str(row.get("output_file", "")))
+                if op.exists():
+                    output_paths.append(op)
+
+            all_dl_paths = output_paths + batch_paths
+            if all_dl_paths:
+                batch_label = datetime.now().strftime("%Y%m%d")
+                zip_bytes = export_zip(recent_df, all_dl_paths)
+                st.download_button(
+                    f"Download latest batch (ZIP)",
+                    data=zip_bytes,
+                    file_name=f"batch_{batch_label}.zip",
+                    mime="application/zip",
+                )
+
+                csv_buf = io.StringIO()
+                recent_df.to_csv(csv_buf, index=False)
+                st.download_button(
+                    f"Download latest batch CSV",
+                    data=csv_buf.getvalue(),
+                    file_name=f"batch_{batch_label}.csv",
                     mime="text/csv",
                 )

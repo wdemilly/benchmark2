@@ -2424,7 +2424,13 @@ with right_col:
                             except Exception as e:
                                 unmatched.append((uf.name, f"metrics error: {e}"))
                                 continue
-                            reports[run_id] = {"metrics": metrics, "filename": uf.name}
+                            # Key on filename so raw and grafted variants of the
+                            # same run_id produce separate rows.
+                            reports[uf.name] = {
+                                "run_id": run_id,
+                                "metrics": metrics,
+                                "filename": uf.name,
+                            }
 
                         if not reports:
                             st.error(
@@ -2433,15 +2439,47 @@ with right_col:
                                 "exports for the drafts just generated."
                             )
                         else:
-                            metrics_by_run = {k: v["metrics"] for k, v in reports.items()}
-                            ranking = rank_by_originality_reports(
-                                metrics_by_run, candidate_drafts
+                            # Verify the uploaded files actually contain color data.
+                            # If every report has zero highlighted cells, the user
+                            # almost certainly uploaded the plain draft exports
+                            # instead of Originality-processed color reports.
+                            total_cells = sum(
+                                v["metrics"].get("total_runs", 0)
+                                for v in reports.values()
                             )
+                            if total_cells == 0:
+                                st.error(
+                                    "Uploaded files contain no color-coded cells. "
+                                    "These look like plain drafts, not Originality "
+                                    "reports. The correct files are the color-"
+                                    "highlighted .docx exports you download from "
+                                    "Originality.ai after scanning each draft — "
+                                    "not the TOP-N files this app produces. "
+                                    "Submit the TOP-N drafts to Originality, "
+                                    "download the color reports, and upload those here."
+                                )
+                            else:
+                                # Build ranking rows per-uploaded-file (not per-run_id),
+                                # so raw vs grafted variants of the same run_id appear
+                                # as separate rows. Sort by rank_score descending.
+                                ranking = []
+                                for fname, report in reports.items():
+                                    ranking.append({
+                                        "filename": fname,
+                                        "run_id": report["run_id"],
+                                        "rank_score": report["metrics"]["rank_score"],
+                                        "metrics": report["metrics"],
+                                    })
+                                ranking.sort(
+                                    key=lambda r: r["rank_score"], reverse=True,
+                                )
+                                for i, row in enumerate(ranking, 1):
+                                    row["rank"] = i
 
-                            # Store on session state so subsequent UI can read it
-                            st.session_state["originality_ranking"] = ranking
-                            st.session_state["originality_reports"] = reports
-                            st.session_state["originality_unmatched"] = unmatched
+                                # Store on session state so subsequent UI can read it
+                                st.session_state["originality_ranking"] = ranking
+                                st.session_state["originality_reports"] = reports
+                                st.session_state["originality_unmatched"] = unmatched
 
                 # --- Display Originality ranking if computed ---
                 orig_ranking = st.session_state.get("originality_ranking")
@@ -2468,10 +2506,11 @@ with right_col:
                     rank_rows = []
                     for row in orig_ranking:
                         m = row["metrics"]
-                        fn = orig_reports.get(row["run_id"], {}).get("filename", "")
+                        fn = row.get("filename", "")
                         rank_rows.append({
                             "rank": row["rank"],
                             "run_id": row["run_id"],
+                            "filename": fn,
                             "rank_score": row["rank_score"],
                             "longest_O": m["longest_strong_O"],
                             "total_O": m["strong_orange"],
@@ -2479,7 +2518,6 @@ with right_col:
                             "mild_G": m["mild_green"],
                             "mild_O": m["mild_orange"],
                             "is_scanner_top1": (row["run_id"] == scanner_top1),
-                            "filename": fn,
                         })
                     st.dataframe(
                         pd.DataFrame(rank_rows),

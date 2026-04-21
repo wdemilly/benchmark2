@@ -1,35 +1,43 @@
 """
 streamlit_predictor_app.py
 
-Minimal Streamlit wrapper around OriginalityPredictor. Upload a draft
-(or paste text), pick a model, click Predict. Shows the predicted score,
-the ridge and NN-mean baselines, the neighbors used, and the rationale.
+Streamlit wrapper around OriginalityPredictor. Two test modes:
 
-Streamlit Cloud entry point. Point your app's "Main file path" at this
-file in the app settings.
+  1) Test on corpus record (LOO)
+     Pick any labeled record from labeled_corpus.json. The app excludes it
+     from the neighbor pool, runs the prediction, and shows the LLM's
+     prediction + ridge and NN-mean baselines alongside the known score.
+     Use this to calibrate the predictor against known labels without
+     uploading anything.
 
-Files that must be in the same repo directory as this script:
+  2) Upload / paste a new draft
+     The app auto-detects whether the uploaded text matches any corpus
+     record (via char-n-gram overlap) and auto-excludes the match from
+     the neighbor pool so the prediction isn't inflated by a self-match.
+
+Files that must live in the same repo as this script:
     originality_predictor.py
     labeled_corpus.json
 
-requirements.txt must contain:
-    streamlit
-    scikit-learn
-    numpy
-    anthropic
+requirements.txt must include:
+    streamlit, scikit-learn>=1.3, numpy>=1.24, anthropic>=0.39
 """
 
 from __future__ import annotations
 
+import html
 import io
+import json as _json
 import re
 import zipfile
-import html
 from pathlib import Path
 
+import numpy as np
 import streamlit as st
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
-from originality_predictor import OriginalityPredictor
+from originality_predictor import OriginalityPredictor, extract_style_features
 
 
 # ---------------------------------------------------------------------------
@@ -37,7 +45,6 @@ from originality_predictor import OriginalityPredictor
 # ---------------------------------------------------------------------------
 
 def read_uploaded(uploaded_file) -> str:
-    """Extract text from an uploaded .txt / .md / .docx."""
     if uploaded_file is None:
         return ""
     name = uploaded_file.name.lower()
@@ -57,13 +64,82 @@ def read_uploaded(uploaded_file) -> str:
 
 @st.cache_resource
 def load_predictor(corpus_path: str) -> OriginalityPredictor:
-    """Instantiate once per app session. Reloads only if corpus_path changes."""
     return OriginalityPredictor(corpus_path)
+
+
+@st.cache_resource
+def build_text_overlap_index(corpus_path: str):
+    """Build a char-n-gram TF-IDF index over the corpus for duplicate detection.
+    Unlike neighbor retrieval (which uses style features), this is specifically
+    for detecting 'is this uploaded draft actually a corpus doc?'.
+    """
+    data = _json.loads(Path(corpus_path).read_text())
+    records = [r for r in data if r.get("human_score") is not None]
+    texts = [r["text"] for r in records]
+    vec = TfidfVectorizer(analyzer="char_wb", ngram_range=(4, 5), max_features=20000)
+    mat = vec.fit_transform(texts)
+    ids = [r["id"] for r in records]
+    return vec, mat, ids
+
+
+def detect_corpus_match(draft_text: str, corpus_path: str, threshold: float = 0.60):
+    """Return (corpus_id, similarity) if the draft matches a corpus record,
+    else (None, best_sim). Char-n-gram is used because shared content is
+    the right signal for duplicate detection (unlike retrieval, where we
+    deliberately avoid it)."""
+    vec, mat, ids = build_text_overlap_index(corpus_path)
+    q = vec.transform([draft_text])
+    sims = cosine_similarity(q, mat).flatten()
+    best_idx = int(np.argmax(sims))
+    best_sim = float(sims[best_idx])
+    if best_sim >= threshold:
+        return ids[best_idx], best_sim
+    return None, best_sim
 
 
 def get_client(api_key: str):
     import anthropic
     return anthropic.Anthropic(api_key=api_key)
+
+
+def render_prediction(result: dict, predictor: OriginalityPredictor,
+                       known_score: int | None = None):
+    """Display a prediction result block."""
+    pred = result["predicted_score"]
+    status = result["parse_status"]
+    if status != "ok":
+        st.warning(f"Parse status: {status}")
+
+    cols = st.columns(5 if known_score is not None else 4)
+    i = 0
+    if known_score is not None:
+        cols[i].metric("Actual", f"{known_score}")
+        i += 1
+    cols[i].metric("LLM predicted", f"{pred}" if pred is not None else "—",
+                   delta=(pred - known_score) if (known_score is not None and pred is not None) else None,
+                   delta_color="off")
+    i += 1
+    cols[i].metric("Ridge baseline", f"{result['style_baseline_score']:.0f}")
+    i += 1
+    cols[i].metric(f"NN-{result['k']} mean", f"{result['nn_mean_baseline']:.0f}")
+    i += 1
+    cols[i].metric("Recommendation", predictor.recommendation(pred))
+
+    st.subheader("Rationale")
+    st.write(result["rationale"])
+
+    st.subheader("Neighbors used")
+    for nb in result["neighbors"]:
+        st.write(
+            f"- **sim={nb['similarity']:.3f}** score={nb['human_score']} "
+            f"wc={nb['word_count']} · `{nb['source_file']}`"
+        )
+
+    with st.expander("Raw LLM response"):
+        st.code(result["raw_response"])
+    with st.expander("Full result JSON"):
+        minimal = {k: v for k, v in result.items() if k != "raw_response"}
+        st.code(_json.dumps(minimal, indent=2, ensure_ascii=False))
 
 
 # ---------------------------------------------------------------------------
@@ -88,14 +164,19 @@ with st.sidebar:
         help="Sonnet is ~1/5 the cost of Opus per call.",
     )
     k = st.slider("Neighbors (k)", min_value=3, max_value=10, value=5)
+    default_key = ""
+    try:
+        default_key = st.secrets.get("ANTHROPIC_API_KEY", "")
+    except Exception:
+        pass
     api_key = st.text_input(
         "Anthropic API key",
         type="password",
-        value=st.secrets.get("ANTHROPIC_API_KEY", "") if hasattr(st, "secrets") else "",
+        value=default_key,
         help="Set ANTHROPIC_API_KEY in Streamlit secrets to avoid re-entering."
     )
 
-# Load predictor up-front so corpus-path errors surface before the user works
+# Load predictor
 try:
     predictor = load_predictor(corpus_path)
     st.caption(
@@ -106,70 +187,175 @@ except Exception as e:
     st.error(f"Failed to load corpus: {e}")
     st.stop()
 
-# --- Input ---
-st.subheader("Draft")
-tab_upload, tab_paste = st.tabs(["Upload file", "Paste text"])
 
-draft_text = ""
-draft_name = ""
-with tab_upload:
-    f = st.file_uploader("Draft file (.txt / .md / .docx)", type=["txt", "md", "docx"])
-    if f is not None:
-        draft_text = read_uploaded(f)
-        draft_name = f.name
-        st.caption(f"{draft_name}: {len(draft_text.split())} words")
-with tab_paste:
-    pasted = st.text_area("Paste draft text", height=200, key="pasted_draft")
-    if pasted.strip() and not draft_text:
-        draft_text = pasted
-        draft_name = "(pasted)"
-        st.caption(f"{len(draft_text.split())} words")
+# --- Tabs for the two modes ---
+tab_corpus, tab_upload = st.tabs([
+    "Test on corpus record (LOO)",
+    "Upload / paste draft",
+])
 
-# --- Closed-form baselines (no API needed — run instantly) ---
-if draft_text.strip():
-    from originality_predictor import extract_style_features
-    query_feat = extract_style_features(draft_text)
-    ridge_base = predictor.ridge_baseline(query_feat)
-    neighbors_preview = predictor.find_neighbors(draft_text, k=k)
-    nn_mean_preview = sum(n.human_score for n in neighbors_preview) / len(neighbors_preview)
 
-    st.subheader("Closed-form baselines (no LLM call)")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Ridge baseline", f"{ridge_base:.0f}",
-              help="15 style features -> ridge regression. LOO MAE 18.83, r +0.504.")
-    c2.metric(f"NN-{k} mean", f"{nn_mean_preview:.0f}",
-              help="Mean human-score of the k nearest neighbors in style-feature space.")
-    c3.metric("Recommendation (ridge)", predictor.recommendation(int(round(ridge_base))))
+# =========================================================================
+# TAB 1 — LOO on corpus record
+# =========================================================================
+with tab_corpus:
+    st.markdown(
+        "Pick a labeled record from the corpus. The app excludes that record "
+        "from the neighbor pool and predicts its score. Compare the "
+        "prediction to the known score."
+    )
 
-    with st.expander("Query style metrics"):
-        st.code(
-            "\n".join(
-                f"  {name}: {query_feat[name]:.3f}" if isinstance(query_feat[name], float)
-                else f"  {name}: {query_feat[name]}"
-                for name in query_feat
-            )
-        )
+    # Build a label-sortable list
+    labeled = sorted(
+        predictor.records,
+        key=lambda r: (-r["human_score"], r["id"]),
+    )
+    options = [
+        f"{r['human_score']:>3d}  |  {r['id']}  ({r['word_count']} wc)"
+        for r in labeled
+    ]
+    choice = st.selectbox(
+        "Corpus record",
+        options=options,
+        index=0,
+        key="loo_choice",
+    )
+    chosen_idx = options.index(choice)
+    chosen = labeled[chosen_idx]
+    known_score = chosen["human_score"]
 
-    with st.expander(f"Top-{k} neighbors (style-feature cosine)"):
-        for nb in neighbors_preview:
-            st.write(
-                f"- **sim={nb.similarity:.3f}** score={nb.human_score} "
-                f"wc={nb.word_count} · `{nb.source_file}`"
-            )
+    st.caption(
+        f"Selected: **{chosen['id']}** — known score **{known_score}**, "
+        f"{chosen['word_count']} words, source `{chosen['source_file']}`"
+    )
 
-# --- LLM prediction ---
-st.subheader("LLM prediction")
-col_run, col_cost = st.columns([1, 2])
-with col_run:
-    go = st.button(
-        "Predict with LLM",
+    # Closed-form baselines for this record (LOO: the record is excluded)
+    rec_feat = extract_style_features(chosen["text"])
+    ridge_base = predictor.ridge_baseline(rec_feat)
+    nb_preview = predictor.find_neighbors(
+        chosen["text"], k=k, exclude_ids={chosen["id"]}
+    )
+    nn_mean_preview = (
+        sum(n.human_score for n in nb_preview) / len(nb_preview) if nb_preview else 0.0
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Known score", f"{known_score}")
+    c2.metric("Ridge (LOO)", f"{ridge_base:.0f}", delta=f"{ridge_base - known_score:+.0f}")
+    c3.metric(f"NN-{k} mean (LOO)", f"{nn_mean_preview:.0f}", delta=f"{nn_mean_preview - known_score:+.0f}")
+    c4.write(" ")
+
+    run_loo = st.button(
+        "Predict with LLM (LOO)",
         type="primary",
-        disabled=not draft_text.strip() or not api_key,
+        disabled=not api_key,
+        key="loo_predict",
         use_container_width=True,
     )
-with col_cost:
+
+    if run_loo:
+        if not api_key:
+            st.error("Need an Anthropic API key in the sidebar.")
+            st.stop()
+        client = get_client(api_key)
+        with st.spinner(f"Calling {model} (corpus record excluded)..."):
+            try:
+                result = predictor.predict(
+                    draft_text=chosen["text"],
+                    client=client,
+                    model=model,
+                    k=k,
+                    exclude_ids={chosen["id"]},
+                )
+            except Exception as e:
+                st.error(f"API error: {e}")
+                st.stop()
+        render_prediction(result, predictor, known_score=known_score)
+
+
+# =========================================================================
+# TAB 2 — Upload / paste
+# =========================================================================
+with tab_upload:
+    st.markdown(
+        "Upload or paste a draft. If its text overlaps with a corpus record, "
+        "the app auto-excludes the match so the prediction isn't inflated "
+        "by a self-hit."
+    )
+
+    draft_text = ""
+    draft_name = ""
+    col_up, col_paste = st.columns(2)
+    with col_up:
+        f = st.file_uploader(
+            "Draft file (.txt / .md / .docx)",
+            type=["txt", "md", "docx"],
+            key="upload_file",
+        )
+        if f is not None:
+            draft_text = read_uploaded(f)
+            draft_name = f.name
+            st.caption(f"{draft_name}: {len(draft_text.split())} words")
+    with col_paste:
+        pasted = st.text_area("Or paste draft text", height=200, key="pasted_draft")
+        if pasted.strip() and not draft_text:
+            draft_text = pasted
+            draft_name = "(pasted)"
+            st.caption(f"{len(draft_text.split())} words")
+
     if draft_text.strip():
-        # Rough cost estimate: 5 * ~3500 + query + prompt ~= 22k input tokens
+        # Detect corpus self-match
+        match_id, match_sim = detect_corpus_match(draft_text, corpus_path)
+        exclude_ids: set[str] = set()
+        known_score_for_upload: int | None = None
+        if match_id is not None:
+            match_rec = next(
+                (r for r in predictor.records if r["id"] == match_id), None
+            )
+            if match_rec is not None:
+                known_score_for_upload = match_rec["human_score"]
+                st.info(
+                    f"This draft matches corpus record **{match_id}** "
+                    f"(char-n-gram cosine **{match_sim:.3f}**, known score "
+                    f"**{known_score_for_upload}**). Auto-excluding from "
+                    f"neighbor pool — prediction will be leave-one-out."
+                )
+                exclude_ids = {match_id}
+        else:
+            st.caption(
+                f"Max corpus overlap: {match_sim:.3f} (threshold 0.60) — treating as new draft."
+            )
+
+        # Closed-form baselines
+        query_feat = extract_style_features(draft_text)
+        ridge_base = predictor.ridge_baseline(query_feat)
+        nb_preview = predictor.find_neighbors(draft_text, k=k, exclude_ids=exclude_ids)
+        nn_mean_preview = (
+            sum(n.human_score for n in nb_preview) / len(nb_preview)
+            if nb_preview else 0.0
+        )
+
+        cols = st.columns(4)
+        if known_score_for_upload is not None:
+            cols[0].metric("Known score", f"{known_score_for_upload}")
+        cols[1].metric("Ridge", f"{ridge_base:.0f}")
+        cols[2].metric(f"NN-{k} mean", f"{nn_mean_preview:.0f}")
+        cols[3].metric("Recommendation (ridge)", predictor.recommendation(int(round(ridge_base))))
+
+        with st.expander("Query style metrics"):
+            st.code("\n".join(
+                f"  {name}: {query_feat[name]:.3f}"
+                if isinstance(query_feat[name], float)
+                else f"  {name}: {query_feat[name]}"
+                for name in query_feat
+            ))
+        with st.expander(f"Top-{k} neighbors"):
+            for nb in nb_preview:
+                st.write(
+                    f"- **sim={nb.similarity:.3f}** score={nb.human_score} "
+                    f"wc={nb.word_count} · `{nb.source_file}`"
+                )
+
         est_tokens = 22_000
         opus_cost = est_tokens / 1_000_000 * 15
         sonnet_cost = est_tokens / 1_000_000 * 3
@@ -178,49 +364,28 @@ with col_cost:
             f"~${opus_cost:.2f} on Opus, ~${sonnet_cost:.2f} on Sonnet."
         )
 
-if go:
-    if not api_key:
-        st.error("Need an Anthropic API key in the sidebar.")
-        st.stop()
-    client = get_client(api_key)
-
-    with st.spinner(f"Calling {model}..."):
-        try:
-            result = predictor.predict(
-                draft_text=draft_text,
-                client=client,
-                model=model,
-                k=k,
-            )
-        except Exception as e:
-            st.error(f"API error: {e}")
-            st.stop()
-
-    pred = result["predicted_score"]
-    status = result["parse_status"]
-    if status != "ok":
-        st.warning(f"Parse status: {status}")
-
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("LLM predicted", f"{pred}" if pred is not None else "—")
-    m2.metric("Ridge baseline", f"{result['style_baseline_score']:.0f}")
-    m3.metric(f"NN-{k} mean", f"{result['nn_mean_baseline']:.0f}")
-    m4.metric("Recommendation", predictor.recommendation(pred))
-
-    st.subheader("Rationale")
-    st.write(result["rationale"])
-
-    st.subheader("Neighbors used")
-    for nb in result["neighbors"]:
-        st.write(
-            f"- **sim={nb['similarity']:.3f}** score={nb['human_score']} "
-            f"wc={nb['word_count']} · `{nb['source_file']}`"
+        run_upload = st.button(
+            "Predict with LLM",
+            type="primary",
+            disabled=not api_key,
+            key="upload_predict",
+            use_container_width=True,
         )
-
-    with st.expander("Raw LLM response"):
-        st.code(result["raw_response"])
-    with st.expander("Full result JSON"):
-        # Strip neighbor text which isn't in this result anyway, plus big raw
-        import json as _json
-        minimal = {k: v for k, v in result.items() if k != "raw_response"}
-        st.code(_json.dumps(minimal, indent=2, ensure_ascii=False))
+        if run_upload:
+            if not api_key:
+                st.error("Need an Anthropic API key in the sidebar.")
+                st.stop()
+            client = get_client(api_key)
+            with st.spinner(f"Calling {model}..."):
+                try:
+                    result = predictor.predict(
+                        draft_text=draft_text,
+                        client=client,
+                        model=model,
+                        k=k,
+                        exclude_ids=exclude_ids or None,
+                    )
+                except Exception as e:
+                    st.error(f"API error: {e}")
+                    st.stop()
+            render_prediction(result, predictor, known_score=known_score_for_upload)

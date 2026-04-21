@@ -217,13 +217,15 @@ def build_corpus(
                 summary["labeled"] += 1
                 summary["by_source"][tag]["labeled"] += 1
 
-    # Deduplicate: identical text across sources is duplicate. Prefer first seen.
+    # Deduplicate: only collapse records whose FULL normalized text is identical.
+    # We deliberately do NOT collapse graft pairs (which share 90%+ of their
+    # text but differ in a handful of sentences) — each has distinct per-
+    # sentence color data that matters for sentence-level training.
     seen = {}
     unique_records = []
     dupes_removed = 0
     for r in records:
-        # Use first 500 chars normalized as a fingerprint
-        fp = re.sub(r"\s+", " ", r["text"])[:500].lower()
+        fp = re.sub(r"\s+", " ", r["text"]).strip().lower()
         if fp in seen:
             dupes_removed += 1
             continue

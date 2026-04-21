@@ -25,6 +25,7 @@ requirements.txt must include:
 
 from __future__ import annotations
 
+import datetime as _dt
 import html
 import io
 import json as _json
@@ -100,6 +101,39 @@ def detect_corpus_match(draft_text: str, corpus_path: str, threshold: float = 0.
 def get_client(api_key: str):
     import anthropic
     return anthropic.Anthropic(api_key=api_key)
+
+
+def record_result(
+    result: dict,
+    predictor: OriginalityPredictor,
+    source_label: str,
+    known_score: int | None,
+):
+    """Append a run to st.session_state['history'] for later download."""
+    if "history" not in st.session_state:
+        st.session_state["history"] = []
+    pred = result["predicted_score"]
+    row = {
+        "timestamp": _dt.datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "source": source_label,
+        "model": result["model"],
+        "k": result["k"],
+        "known_score": known_score if known_score is not None else "",
+        "llm_pred": pred if pred is not None else "",
+        "abs_error_llm": (abs(pred - known_score)
+                          if (known_score is not None and pred is not None) else ""),
+        "ridge_pred": result["style_baseline_score"],
+        "nn_mean_pred": result["nn_mean_baseline"],
+        "recommendation": predictor.recommendation(pred),
+        "parse_status": result["parse_status"],
+        "rationale": result["rationale"],
+        "neighbors": "; ".join(
+            f"{nb['id']}(score={nb['human_score']},sim={nb['similarity']:.3f})"
+            for nb in result["neighbors"]
+        ),
+        "input_tokens_est": result["input_token_estimate"],
+    }
+    st.session_state["history"].append(row)
 
 
 def render_prediction(result: dict, predictor: OriginalityPredictor,
@@ -271,6 +305,9 @@ with tab_corpus:
                 st.error(f"API error: {e}")
                 st.stop()
         render_prediction(result, predictor, known_score=known_score)
+        record_result(result, predictor,
+                      source_label=f"LOO:{chosen['id']}",
+                      known_score=known_score)
 
 
 # =========================================================================
@@ -389,3 +426,93 @@ with tab_upload:
                     st.error(f"API error: {e}")
                     st.stop()
             render_prediction(result, predictor, known_score=known_score_for_upload)
+            record_result(result, predictor,
+                          source_label=f"upload:{draft_name}",
+                          known_score=known_score_for_upload)
+
+# =========================================================================
+# Session history + downloads
+# =========================================================================
+st.divider()
+st.header("Session history")
+
+hist = st.session_state.get("history", [])
+if not hist:
+    st.caption(
+        "No predictions yet this session. Every LLM prediction you run "
+        "will be captured here and can be downloaded as CSV or as a text "
+        "report."
+    )
+else:
+    st.caption(
+        f"{len(hist)} prediction(s) this session. History lives in the "
+        "browser session only — reload = gone. Download before you close."
+    )
+
+    # Compact table view
+    import pandas as _pd
+    df = _pd.DataFrame(hist)
+    compact_cols = [
+        "timestamp", "source", "model", "known_score",
+        "llm_pred", "abs_error_llm", "ridge_pred", "nn_mean_pred",
+        "recommendation", "parse_status",
+    ]
+    compact_cols = [c for c in compact_cols if c in df.columns]
+    st.dataframe(df[compact_cols], use_container_width=True, hide_index=True)
+
+    # Summary metrics (where known_score is available)
+    scored = [r for r in hist
+              if r.get("known_score") not in ("", None)
+              and r.get("llm_pred") not in ("", None)]
+    if len(scored) >= 2:
+        abs_errors = [abs(int(r["llm_pred"]) - int(r["known_score"])) for r in scored]
+        mae = sum(abs_errors) / len(abs_errors)
+        st.metric(
+            f"Session MAE (across {len(scored)} runs with known scores)",
+            f"{mae:.2f}",
+            help="Mean absolute error between LLM prediction and known score.",
+        )
+
+    col_csv, col_txt, col_clear = st.columns(3)
+
+    # CSV download — all columns, full rationale + neighbors included
+    csv_bytes = df.to_csv(index=False).encode("utf-8")
+    ts = _dt.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    col_csv.download_button(
+        "Download CSV",
+        data=csv_bytes,
+        file_name=f"predictor_session_{ts}.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+
+    # Human-readable TXT report
+    report_lines = [
+        f"Predictor session report",
+        f"Generated: {_dt.datetime.utcnow().isoformat(timespec='seconds')}Z",
+        f"Runs: {len(hist)}",
+        "=" * 70,
+        "",
+    ]
+    for r in hist:
+        report_lines.append(f"[{r['timestamp']}]  source={r['source']}")
+        report_lines.append(
+            f"  model={r['model']}  k={r['k']}  "
+            f"known={r['known_score']}  llm={r['llm_pred']}  "
+            f"ridge={r['ridge_pred']}  nn_mean={r['nn_mean_pred']}  "
+            f"recommendation={r['recommendation']}"
+        )
+        report_lines.append(f"  neighbors: {r['neighbors']}")
+        report_lines.append(f"  rationale: {r['rationale']}")
+        report_lines.append("")
+    col_txt.download_button(
+        "Download report (TXT)",
+        data="\n".join(report_lines).encode("utf-8"),
+        file_name=f"predictor_session_{ts}.txt",
+        mime="text/plain",
+        use_container_width=True,
+    )
+
+    if col_clear.button("Clear history", use_container_width=True):
+        st.session_state["history"] = []
+        st.rerun()

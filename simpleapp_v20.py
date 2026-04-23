@@ -2171,6 +2171,7 @@ def generate_quality_gated_batch(
         )
         if locked_target_quality_score is None:
             locked_target_quality_score = int(round_top_quality_score)
+        top_quality_score = int(round_top_quality_score)
         target_quality_score = int(locked_target_quality_score or 0)
         retained_ids = [
             rid for rid in acceptable_ids
@@ -2206,12 +2207,14 @@ def generate_quality_gated_batch(
             "acceptable": len(acceptable_ids),
             "retained": retained_count,
             "top_quality_score": int(top_quality_score),
+            "target_quality_score": int(target_quality_score),
             "retained_run_ids": retained_ids[:],
         })
 
         status.info(
             f"Quality gate round {round_no}/{max_tries} complete · "
-            f"retained {retained_count}/{total_slots} at writing score {top_quality_score}"
+            f"retained {retained_count}/{total_slots} at target writing score {target_quality_score} "
+            f"(round top {top_quality_score})"
         )
 
         if retained_count >= total_slots:

@@ -6,7 +6,6 @@ v16 adds Stage F: a ridge-regression predictor of the Originality human-score,
 fit on labeled_corpus.json and run on the final shipped text. No API call; the
 ridge lives inline. Output is a predicted score (0–100) and a recommendation
 band (SHIP / RECONSIDER / REGENERATE). Advisory — does not gate shipping.
-
 v17 adds Stage G: a line-edit pass that runs on the final shipped text.
 G1 is a mechanical copyedit — one LLM call with strict punctuation-only
 instructions and a word-sequence invariant check that rejects any edit that
@@ -19,9 +18,7 @@ deletion with a/an article repair where deletion leaves the sentence intact;
 FINAL_<batch_stub>_LINEEDITED.txt and a LINEEDIT_REPORT_<batch_stub>.txt
 audit file alongside the existing FINAL outputs. Stage F's prediction
 subsequently runs on the line-edited text when one was produced.
-
 The pipeline answers three questions in order:
-
   Q1. Is this draft acceptable as prose? A pass/fail quality floor on each
       draft. Voice intact, beats landed, dialogue working, no collapses or
       incoherences. Unacceptable drafts are dropped entirely — not shipped,
@@ -29,7 +26,6 @@ The pipeline answers three questions in order:
       the pipeline halts and reports failure. The floor is lenient: it
       catches drafts you would be embarrassed to ship, not drafts that are
       merely different from the others.
-
   Q2. Among acceptable drafts, which ships? Literary ranking leads.
       The evaluator's top-ranked draft is TOP 1 unless it is a scanner
       outlier — defined as having more than double the batch median
@@ -37,51 +33,38 @@ The pipeline answers three questions in order:
       next literary-ranked draft that is not an outlier becomes TOP 1.
       This restores prose quality as the primary selection signal while
       protecting against the v9 failure mode (best prose = worst scan).
-
   Q3. Two-stage graft pass with two pathways and two graft units:
-
       Stage 1 (identification). Wide-net sweep of all runner-ups. For every
       sentence or clause that serves the same NARRATIVE FUNCTION as some
       text in TOP 1 — characterizing the same subject, marking the same
       interior movement, describing the same object or action — emit a
       candidate. Staging may differ; function must match.
-
       Stage 2 (commit). Each candidate is judged COMMIT or REJECT against
       three gates: donor is clean of hard-cap patterns, replacement
       preserves continuity with surrounding TOP 1 prose, and the graft
       genuinely improves on the TOP 1 text. Minimal seam edits at the
       boundary are permitted (at most one connecting word per side) and
       logged.
-
       Two pathways remain:
-
       Type A — FLAG REPAIR. TOP 1 text carries a flagged construction;
       donor is clean at the same function.
-
       Type B — QUALITY UPGRADE. TOP 1 text is acceptable but the donor
       is meaningfully better prose at the same function.
-
       Two units:
-
       Sentence-level: replace a whole TOP 1 sentence with a donor sentence.
       Phrase-level: replace a clause inside a TOP 1 sentence with a donor
       clause. Phrase grafts let a sharp clause from a divergent scene
       enter TOP 1 without importing the surrounding staging.
-
       Substitution is deterministic find-and-replace in Python, not an
       LLM pass. The model identifies, judges, and specifies seam edits;
       the code substitutes.
-
 The scanner informs Q2 (veto only) and Q3. The literary evaluator drives
 Q1 and Q2 selection.
-
 Export: top-N acceptable drafts as separate files + TOP1_GRAFTED (when
 any grafts applied) + a batch summary naming any rejections.
-
 The generation prompt lives in prompts.csv. The app does not inject its
 own drafting instructions.
 """
-
 import base64
 import io
 import json
@@ -92,43 +75,34 @@ from datetime import datetime
 from pathlib import Path
 from dataclasses import dataclass, asdict
 from typing import Optional, List, Tuple
-
 import pandas as pd
 import numpy as np
 import requests
 import streamlit as st
-
 try:
     import anthropic
     ANTHROPIC_AVAILABLE = True
 except ImportError:
     ANTHROPIC_AVAILABLE = False
-
 try:
     import docx as python_docx
     DOCX_AVAILABLE = True
 except ImportError:
     DOCX_AVAILABLE = False
-
-
 # ============================================================================
 # Constants
 # ============================================================================
-
 APP_VERSION = "v17"
-
 RUNS_DIR = Path("micro_prompt_runs")
 OUTPUTS_DIR = RUNS_DIR / "flat_outputs"
 FINAL_DIR = RUNS_DIR / "final_deliverables"
 CSV_FILENAME = "runs.csv"
 PROMPTS_CSV = "prompts.csv"
-
 DEFAULT_GEN_MODEL = "claude-opus-4-7"
 DEFAULT_EVAL_MODEL = "claude-opus-4-6"
 MAX_GEN_TOKENS = 16000
 MAX_EVAL_TOKENS = 8000
 QUALITY_GATE_MAX_TRIES = 5
-
 # Stage F: ridge predictor of Originality human-score.
 # The labeled corpus file lives at the repo root beside this script. If
 # missing, Stage F degrades gracefully — the pipeline runs, the summary
@@ -138,7 +112,6 @@ STAGE_F_RIDGE_LAMBDA = 3.0           # corpus-fit L2 regularization
 STAGE_F_BAND_SHIP = 88               # pred ≥ 88 → SHIP
 STAGE_F_BAND_CAUTION = 80            # 80 ≤ pred < 88 → RECONSIDER
 # below STAGE_F_BAND_CAUTION → REGENERATE
-
 # Stage G: line-edit pass.
 # AI_TELL_WORDS drives the G2 identification pass and the G3b deletion
 # heuristic. Each entry maps a canonical word name to a list of (pattern,
@@ -151,7 +124,6 @@ STAGE_F_BAND_CAUTION = 80            # 80 ≤ pred < 88 → RECONSIDER
 # positives are minimized.
 STAGE_G_ENABLED = True
 STAGE_G_MAX_WORD_DELTA = 0  # G1 mechanical pass rejected if word count changes
-
 AI_TELL_WORDS = {
     "particular": [
         # "a particular <X>"  → "a <X>"    (a/an fix-up runs afterward)
@@ -163,126 +135,75 @@ AI_TELL_WORDS = {
         (r"\bparticularly\s+", ""),
     ],
 }
-
-
 # ============================================================================
 # Literary evaluator prompt — unchanged from original app
 # ============================================================================
-
 EVALUATOR_PROMPT = """You are evaluating {N} drafts of the same chapter against its outline. You have three inputs: the chapter outline, the mechanical scanner results for each draft, and the drafts themselves.
-
 Read every draft in full. Do not skim.
-
 Your job is to do three things in order:
 (1) apply a lenient quality floor so the pipeline knows which drafts are fit to ship at all,
 (2) assign each draft a prose-quality score,
 and (3) rank only the top-scoring drafts.
-
 The pipeline will keep ONLY the drafts that tie for the highest QUALITY_SCORE among ACCEPTABLE drafts. Every acceptable draft below that top score is discarded before the downstream AI ranking. So be willing to use ties when the writing quality is genuinely equal, but do not collapse distinct quality levels into a tie out of caution.
-
 YOUR METHOD — in this order:
-
 1. WORD COUNTS. Note each draft's word count against the outline's target range. Flag any that are materially short or over.
-
 2. MECHANICAL COMPLIANCE. The scanner results are provided below. For each draft, note the violation counts. Do not re-scan — use the provided numbers. Reference them when assessing prose, but do not let them drive your quality verdict. Violations affect downstream diagnostics; your job here is writing quality.
-
 3. QUALITY FLOOR — one verdict per draft. For each draft, decide ACCEPTABLE or UNACCEPTABLE. Apply a LENIENT standard: mark a draft ACCEPTABLE unless you would be embarrassed to ship it. UNACCEPTABLE means one or more of:
    - Voice collapse: the POV character's interior voice is absent, generic, or wrong register for long stretches.
    - Beats missing or compressed to the point of incoherence: a scene the outline requires is not on the page or is a throwaway line.
    - Dialogue that doesn't land: exchanges without subtext, without weapons, without stakes; turns that read like exposition dumps.
    - Structural failure: the chapter doesn't arrive where the outline says it arrives, or the ending doesn't close what was opened.
    - Prose-level damage: runs of flat summary where the outline asks for scene, long stretches of interpretive narration where the outline asks for observation and judgment, abandoned subplots, characters acting out of their profiles.
-
    Merely being less elegant than another draft is NOT grounds for UNACCEPTABLE. Stylistic difference is NOT grounds for UNACCEPTABLE. A draft can be ACCEPTABLE even if another draft is better at the same beats.
-
 4. QUALITY SCORE — one integer score per draft, on a 1–10 scale, where 10 is the strongest prose in this batch and 1 is the weakest prose that still functions at all. Score on prose quality only: voice fidelity, dialogue craft, interior sharpness, beat execution, specificity, texture, rhythm, wit. Use the scale comparatively across THIS batch. If two drafts are genuinely equal in prose quality, give them the same score. UNACCEPTABLE drafts should get a score of 0.
-
 5. TIE-ONLY RANKING. Rank ONLY the ACCEPTABLE drafts that received the highest QUALITY_SCORE. Omit every other draft from the ranking line, even if acceptable. The downstream AI ranking will break ties among these top-scoring drafts.
-
 6. GRAFT CANDIDATES. From the non-winning top-scoring drafts, name specific lines or passages worth transplanting into the eventual winner. Quote a few words for identification and name the beat where each would land. This is advisory context for the downstream graft pass.
-
 OUTPUT FORMAT
-
 For each draft, write a paragraph (3-5 sentences) covering voice quality, best moment, notable weaknesses, and a one-sentence justification for your quality verdict. Reference the scanner numbers.
-
 Then on a line by itself for each draft (one line per draft):
-
 QUALITY: Draft N — ACCEPTABLE
 or
 QUALITY: Draft N — UNACCEPTABLE — [one-sentence reason]
-
 Then on a line by itself for each draft:
-
 QUALITY_SCORE: Draft N — S
-
 (where S is an integer from 0 to 10. Use 0 only for UNACCEPTABLE drafts.)
-
 Then a graft paragraph naming specific lines from non-winning top-scoring drafts worth transplanting, with beat locations.
-
 Then on a line by itself:
-
 RANKING: N, N, N, ...
-
 (ONLY the ACCEPTABLE drafts tied at the highest QUALITY_SCORE, from strongest to weakest if there is still a distinction. Separated by commas. If only one draft has the top score, the line should contain only that draft number.)
-
 Then on the final line:
-
 WINNER: N
-
 (the one draft from the RANKING line you would ship on literary grounds, before the downstream AI ranking breaks ties)
-
 Nothing after that line."""
-
 EVALUATOR_SCANNER_BLOCK = """=== MECHANICAL SCANNER RESULTS ===
-
 {scanner_text}
-
 === CHAPTER OUTLINE ===
-
 {outline_text}
-
 """
-
-
 # ============================================================================
 # Line-graft prompts — two-stage: candidate identification, then commit
 # ============================================================================
-
 LINE_GRAFT_CANDIDATE_PROMPT = """You are comparing {N} drafts of the same chapter. Draft 1 is TOP 1 — the shipping base. Drafts 2–{N} are acceptable runners-up.
-
 Your job is to identify every sentence or clause in the runners-up that could usefully replace a counterpart in TOP 1. This is a wide-net identification pass. Do not commit yet. Commit decisions happen in the next step.
-
 Two kinds of candidate:
-
 TYPE A — FLAG REPAIR. TOP 1's text carries one of the flagged patterns (listed below) and a runner-up has a clean version that does the same narrative function in the scene.
-
 TYPE B — QUALITY UPGRADE. TOP 1's text is acceptable but a runner-up sentence or clause at the same narrative function is meaningfully better — sharper image, more specific physical detail, stronger interior voice, cleaner dialogue. The runner-up version is the one a reader would underline.
-
 GRAFT UNITS. A candidate may be:
 - SENTENCE: replace a whole TOP 1 sentence with a donor sentence.
 - PHRASE: replace a clause or phrase inside a TOP 1 sentence with a donor clause or phrase. Phrase-level grafts let you import the sharp clause from a donor whose surrounding sentence structure won't fit.
-
 MATCHING RULE. The donor and the TOP 1 text must serve the same NARRATIVE FUNCTION — characterize the same subject, mark the same interior movement, describe the same object or action. Surrounding staging MAY DIFFER; function must be the same. Do not reject a candidate because the scene frames the moment differently — only because the two texts do different work.
-
 CLEAN DONOR REQUIREMENT. The donor text itself must contain ZERO flagged patterns:
 - "the way X" observational framing
 - Periphrastic observational framing ("as though he were," "like a woman who," "in the manner of," "as a man who")
 - "not X but Y" negation pivots in narration (dialogue permitted)
 - Named emotions in third-person-like form ("a wave of sadness"); first-person naming in Dinah's interior voice is PERMITTED
 - Em-dash over-cap (count exceeds 7 for the whole chapter)
-
 A donor that would introduce a new flag is disqualified. Note any such concern in JUSTIFICATION so the commit pass can address it.
-
 SCANNER-FLAGGED PASSAGES IN TOP 1
-
 {winner_flags}
-
 SCANNER COUNTS PER DRAFT
-
 {scanner_summary}
-
 OUTPUT FORMAT — follow exactly. For each candidate, emit one block:
-
 CANDIDATE <n>
 TYPE: A | B
 UNIT: sentence | phrase
@@ -291,43 +212,27 @@ DONOR_DRAFT: <draft number 2–{N}>
 DONOR_TEXT: "<exact donor text>"
 FUNCTION: <one line — the narrative function both texts serve>
 JUSTIFICATION: <one line — for Type A, name the flag; for Type B, name what makes the donor better>
-
 Cast a wide net. Do NOT cap the list. If a candidate looks marginal, include it and let the commit pass judge.
-
 If no candidates exist at all, return exactly:
-
 NO_CANDIDATES
-
 Quote TOP1_TEXT and DONOR_TEXT EXACTLY as they appear in the drafts — character-level precision, including punctuation and spacing. The commit pass and the downstream substitution rely on verbatim matching."""
-
-
 LINE_GRAFT_COMMIT_PROMPT = """You are reviewing graft candidates proposed in an earlier identification pass, and deciding which to commit.
-
 TOP 1 is the shipping base. Below the candidates you will find all {N} drafts. Each candidate proposes replacing some TOP1_TEXT with a DONOR_TEXT from a runner-up.
-
 For each candidate you must decide COMMIT or REJECT.
-
 COMMIT when:
 - The graft genuinely improves TOP 1 (clears a flag, or imports a sharper sentence or clause)
 - The donor text is clean of all flagged patterns
 - Continuity is preserved — the replacement reads naturally with the sentences before and after it in TOP 1
-
 REJECT when:
 - The donor text itself carries a flagged pattern ("the way X," periphrastic "as though/like a [person] who/as a man who," "not X but Y" in narration, third-person emotion naming, em-dash over cap)
 - The graft breaks continuity with the surrounding TOP 1 prose
 - The donor is only marginally different, not meaningfully better
 - The function match is superficial — the two texts do different narrative work despite looking similar
-
 SEAM EDITS. If the graft needs a minor adjustment at its boundary — a connecting word added, changed, or removed on either side to preserve grammar or flow — extend the TOP1_TEXT to include the adjusted word, and bake the adjustment into the DONOR_TEXT. Describe what changed in the SEAM_EDITS field. At most one connecting word or short phrase per side. If more is needed, reject the graft.
-
 If the candidate's original TOP1_TEXT or DONOR_TEXT is close but not verbatim to what appears in the drafts, correct it in your output. The final TOP1_TEXT and DONOR_TEXT you emit must match the drafts character-for-character, or the downstream substitution will fail.
-
 CANDIDATES UNDER REVIEW
-
 {candidates_block}
-
 OUTPUT FORMAT — follow exactly. For each candidate, emit one block:
-
 COMMIT_CANDIDATE <n>
 DECISION: COMMIT | REJECT
 TYPE: A | B
@@ -337,37 +242,22 @@ DONOR_DRAFT: <draft number>
 DONOR_TEXT: "<exact donor text with any seam edits baked in>"
 SEAM_EDITS: none | <one-line description of what changed at the boundary>
 REASON: <one line>
-
 After all blocks, emit a summary line:
-
 FINAL_GRAFTS: <comma-separated candidate numbers that were COMMITted, or NONE>
-
 Quote TOP1_TEXT and DONOR_TEXT EXACTLY. Do not paraphrase. Character-level precision is required."""
-
-
 # ============================================================================
 # Final pass — commercial vs literary pick across acceptable drafts
 # ============================================================================
-
 FINAL_PASS_PROMPT = """You will receive {N} drafts of the same chapter. The outline's GLOBAL DRAFTING CONTROLS section is the binding reference for register targets, hard caps, and per-beat contract requirements.
-
 Read each draft end to end. Write a craft evaluation in prose, one paragraph per draft, noting what it does well and where the register drifts. Attend particularly to sustained interior voice, whether the Bridget speech lands with concrete specifics, whether the Stainforth letter opens with the lease terms named on the page, whether the soldier scene carries the emotional channel and the romantic-line plant, whether the loneliness beat at locking-up is delivered, and whether the prose carries aphoristic closures, stacked periphrastic observation, or "the way X" constructions that cost commercial register.
-
 After the per-draft paragraphs, write a comparative paragraph that contrasts the two picks you will name and explains the trade each represents.
-
 Close with exactly two lines in this format, with no other text after them:
-
 MOST_LITERARY: T<n>
 MOST_COMMERCIAL: T<n>
-
 The literary pick is the draft that reads best as literary fiction — richer prose texture, more willing flourish, closer to the Faulksian register. The commercial pick is the draft that best fits the Dare/Quinn register and delivers the commercial contract beats with the cleanest interior voice.
-
 OUTLINE (GLOBAL DRAFTING CONTROLS reference)
-
 {outline_text}
 """
-
-
 def run_final_pass(
     client,
     eval_model: str,
@@ -378,7 +268,6 @@ def run_final_pass(
     """Evaluate all acceptable drafts and pick one literary winner and one
     commercial winner. One LLM call, paragraph-per-draft reasoning, tagged
     picks at the tail for deterministic parsing.
-
     Args:
         acceptable_drafts: list of draft dicts that cleared Q1. Each has
                            'run_id' and 'text'. Position in this list is
@@ -388,7 +277,6 @@ def run_final_pass(
                       the evaluator has the GLOBAL DRAFTING CONTROLS
                       section to anchor register judgments.
         batch_stub: for file naming.
-
     Returns dict with:
       - ran: bool (False if fewer than 2 acceptable drafts)
       - literary_index: 1-indexed position of the literary pick in
@@ -412,11 +300,9 @@ def run_final_pass(
         "reasoning_path": "",
         "raw": "",
     }
-
     n = len(acceptable_drafts)
     if n < 2:
         return result
-
     prompt = FINAL_PASS_PROMPT.format(
         N=n,
         outline_text=(outline_text.strip() if outline_text
@@ -427,7 +313,6 @@ def run_final_pass(
         parts.append(
             f"\n\n=== T{i} (run_id: {d['run_id']}) ===\n\n{d['text']}"
         )
-
     resp = client.messages.create(
         model=eval_model,
         max_tokens=MAX_EVAL_TOKENS,
@@ -436,26 +321,21 @@ def run_final_pass(
     raw = "\n".join(b.text for b in resp.content if getattr(b, "text", None))
     result["raw"] = raw
     result["ran"] = True
-
     lit_m = re.search(r"MOST_LITERARY:\s*T\s*(\d+)", raw, re.IGNORECASE)
     com_m = re.search(r"MOST_COMMERCIAL:\s*T\s*(\d+)", raw, re.IGNORECASE)
-
     if lit_m:
         idx = int(lit_m.group(1))
         if 1 <= idx <= n:
             result["literary_index"] = idx
             result["literary_run_id"] = acceptable_drafts[idx - 1]["run_id"]
-
     if com_m:
         idx = int(com_m.group(1))
         if 1 <= idx <= n:
             result["commercial_index"] = idx
             result["commercial_run_id"] = acceptable_drafts[idx - 1]["run_id"]
-
     # Save the two picks as separate files with the picks in the filenames.
     lit_idx = result["literary_index"]
     com_idx = result["commercial_index"]
-
     if lit_idx:
         lit_path = FINAL_DIR / (
             f"FINAL_{batch_stub}_literary-T{lit_idx}"
@@ -464,7 +344,6 @@ def run_final_pass(
         )
         save_text(lit_path, acceptable_drafts[lit_idx - 1]["text"])
         result["literary_path"] = str(lit_path)
-
     if com_idx:
         com_path = FINAL_DIR / (
             f"FINAL_{batch_stub}_commercial-T{com_idx}"
@@ -473,19 +352,14 @@ def run_final_pass(
         )
         save_text(com_path, acceptable_drafts[com_idx - 1]["text"])
         result["commercial_path"] = str(com_path)
-
     # Save the reasoning too, for auditability.
     reasoning_path = FINAL_DIR / f"FINAL_{batch_stub}_pass_reasoning.txt"
     save_text(reasoning_path, raw)
     result["reasoning_path"] = str(reasoning_path)
-
     return result
-
-
 # ============================================================================
 # Data model
 # ============================================================================
-
 @dataclass
 class RunRecord:
     run_id: str = ""
@@ -525,20 +399,14 @@ class RunRecord:
     quality_score: int = 0
     # Pipeline outcome for this draft
     pipeline_role: str = ""  # "top1_winner" / "graft_donor" / "dropped_unacceptable" / ""
-
-
 RUN_FIELDS = list(RunRecord.__dataclass_fields__.keys())
-
-
 # ============================================================================
 # Mechanical scanner — deterministic, no LLM
 # ============================================================================
-
 # "The way X" family. Matches "the way a/an/the/he/she/it/they/we/I/you/<name>"
 # plus "the way <word>" as a catch-all. Case-insensitive, word-boundary anchored
 # so "gateway" does not match.
 THE_WAY_PATTERN = re.compile(r"\bthe\s+way\s+\w+", re.IGNORECASE)
-
 # Periphrastic observational (closes the loophole if the generator rewrites
 # "the way she watched" as "as though she were watching" or "in the manner
 # of someone watching").
@@ -546,14 +414,12 @@ PERIPHRASTIC_PATTERN = re.compile(
     r"\b(?:as\s+though\s+(?:he|she|it|they)\s+were|in\s+the\s+manner\s+of)\b",
     re.IGNORECASE,
 )
-
 # "Not X but Y" negation pivots. Kept tight to avoid catching dialogue —
 # we re-check the match position against quote count before flagging.
 NOT_BUT_PATTERN = re.compile(
     r"\bnot\s+(?:[a-z\s,']{1,50}?)\s+but\s+(?:[a-z]+)",
     re.IGNORECASE,
 )
-
 # Emotion-naming in narration (approximate). Catches "she felt X," "a wave
 # of X," "with a sense of X," and "a <emotion> <verb>" patterns.
 EMOTION_WORDS = (
@@ -571,20 +437,15 @@ EMOTION_NAMING_PATTERN = re.compile(
     rf"a\s+(?:{EMOTION_WORDS})\s+(?:settled|rose|came|washed|filled|took))\b",
     re.IGNORECASE,
 )
-
-
 def scan_draft(text: str) -> dict:
     """Run deterministic mechanical checks against a draft.
-
     Returns counts, percentages, a pass/fail flag, and flagged passages with
     context for human review. Pass/fail is conservative — a draft that trips
     any hard cap fails.
     """
     words = re.findall(r"\b[\w']+\b", text)
     wc = len(words) or 1
-
     flagged = []
-
     # "The way X"
     the_way_matches = list(THE_WAY_PATTERN.finditer(text))
     for m in the_way_matches[:30]:
@@ -594,7 +455,6 @@ def scan_draft(text: str) -> dict:
             "rule": "the_way_x",
             "context": text[start:end].replace("\n", " ").strip(),
         })
-
     # Periphrastic observational
     periphrastic_matches = list(PERIPHRASTIC_PATTERN.finditer(text))
     for m in periphrastic_matches[:15]:
@@ -604,7 +464,6 @@ def scan_draft(text: str) -> dict:
             "rule": "periphrastic_observational",
             "context": text[start:end].replace("\n", " ").strip(),
         })
-
     # "Not X but Y" — skip if inside quotes (dialogue)
     not_but_matches = []
     for m in NOT_BUT_PATTERN.finditer(text):
@@ -620,11 +479,9 @@ def scan_draft(text: str) -> dict:
             "rule": "not_x_but_y",
             "context": text[start:end].replace("\n", " ").strip(),
         })
-
     # Em-dashes
     em_dash_count = text.count("\u2014")
     em_per_1k = round(em_dash_count / wc * 1000, 2)
-
     # Emotion-naming
     emotion_matches = list(EMOTION_NAMING_PATTERN.finditer(text))
     for m in emotion_matches[:15]:
@@ -634,12 +491,10 @@ def scan_draft(text: str) -> dict:
             "rule": "emotion_naming",
             "context": text[start:end].replace("\n", " ").strip(),
         })
-
     # Punctuation
     semicolons = text.count(";")
     colons = len(re.findall(r"(?<!\d):(?!\d)", text))
     parens = text.count("(")
-
     # Sentence stats
     sentences = re.split(r"(?<=[.!?])\s+", text)
     sentences = [s.strip() for s in sentences if s.strip()]
@@ -650,7 +505,6 @@ def scan_draft(text: str) -> dict:
     long_pct = round(long_sents / total_sents * 100, 2)
     fragments = sum(1 for length in sent_lens if 1 <= length <= 3)
     frag_pct = round(fragments / total_sents * 100, 2)
-
     # Hard cap pass
     hard_cap_pass = (
         len(the_way_matches) == 0
@@ -659,7 +513,6 @@ def scan_draft(text: str) -> dict:
         and em_dash_count <= 12
         and em_per_1k <= 3.0
     )
-
     return {
         "scan_the_way_count": len(the_way_matches),
         "scan_periphrastic_count": len(periphrastic_matches),
@@ -676,8 +529,6 @@ def scan_draft(text: str) -> dict:
         "scan_hard_cap_pass": hard_cap_pass,
         "scan_flagged_passages": json.dumps(flagged[:40], ensure_ascii=False),
     }
-
-
 def format_scan_summary(scan: dict) -> str:
     """One-line summary of scan results for UI display."""
     flags = []
@@ -693,8 +544,6 @@ def format_scan_summary(scan: dict) -> str:
         flags.append(f"emotion×{scan['scan_emotion_naming_count']}")
     status = "PASS" if scan["scan_hard_cap_pass"] else "FAIL"
     return f"{status} ({', '.join(flags) if flags else 'clean'})"
-
-
 # ============================================================================
 # Stage F — ridge predictor of Originality human-score (deterministic, no LLM)
 #
@@ -708,8 +557,6 @@ def format_scan_summary(scan: dict) -> str:
 # the manual Originality submission step when the prediction is clearly in
 # or out of band.
 # ============================================================================
-
-
 # Six corpus-fit structural features:
 #   1  sentence-length standard deviation
 #   2  word count
@@ -728,41 +575,29 @@ STAGE_F_FEATURE_NAMES = [
     "periphrastic_per_1k",
     "mean_commas_per_sentence",
 ]
-
-
 def _stage_f_sentence_texts(text: str) -> list:
     """Sentence splitter aligned with scan_draft's heuristic."""
     return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
-
-
 def _stage_f_sentence_lengths(text: str) -> list:
     sents = _stage_f_sentence_texts(text)
     return [len(re.findall(r"\b[\w']+\b", s)) for s in sents]
-
-
 def _stage_f_periphrastic_count(text: str) -> int:
     return len(PERIPHRASTIC_PATTERN.findall(text))
-
-
 def stage_f_extract_features(text: str) -> np.ndarray:
     """Return the Stage F feature vector for a draft.
-
     These features were chosen because they improved leave-one-out accuracy
     on the supplied labeled corpus while remaining cheap to compute at run
     time and independent of any API call.
     """
     words = re.findall(r"\b[\w']+\b", text.lower())
     wc = max(len(words), 1)
-
     sents = _stage_f_sentence_texts(text)
     sent_lengths = _stage_f_sentence_lengths(text) or [0]
     sent_arr = np.asarray(sent_lengths, dtype=float)
-
     mean_commas = float(np.mean([s.count(",") for s in sents] or [0]))
     semicolons_per_1k = text.count(";") / wc * 1000.0
     em_dashes_per_1k = text.count("\u2014") / wc * 1000.0
     periphrastic_per_1k = _stage_f_periphrastic_count(text) / wc * 1000.0
-
     feats = [
         float(sent_arr.std()),
         float(wc),
@@ -772,8 +607,6 @@ def stage_f_extract_features(text: str) -> np.ndarray:
         float(mean_commas),
     ]
     return np.asarray(feats, dtype=float)
-
-
 def _stage_f_fit_ridge(X: np.ndarray, y: np.ndarray, lam: float) -> np.ndarray:
     """Closed-form ridge: β = (XᵀX + λI)⁻¹ Xᵀy. X includes a leading 1-column
     for the intercept; the intercept term is NOT penalized."""
@@ -782,38 +615,29 @@ def _stage_f_fit_ridge(X: np.ndarray, y: np.ndarray, lam: float) -> np.ndarray:
     reg[0, 0] = 0.0  # don't regularize intercept
     beta = np.linalg.solve(X.T @ X + reg, X.T @ y)
     return beta
-
-
 def _stage_f_loo_metrics(X_raw: np.ndarray, y: np.ndarray, lam: float) -> tuple:
     """Exact leave-one-out metrics with train-fold scaling.
-
     This is slower than the previous shortcut but the corpus is small enough
     that it remains cheap, and it reports a more honest advisory benchmark.
     """
     n = X_raw.shape[0]
     if n == 0:
         return float("nan"), float("nan")
-
     preds = []
     idx = np.arange(n)
     for i in range(n):
         mask = idx != i
         X_train = X_raw[mask]
         y_train = y[mask]
-
         mu = X_train.mean(axis=0)
         sigma = X_train.std(axis=0)
         sigma = np.where(sigma < 1e-9, 1.0, sigma)
-
         Xn_train = (X_train - mu) / sigma
         x_test = (X_raw[i] - mu) / sigma
-
         X_full = np.column_stack([np.ones(Xn_train.shape[0]), Xn_train])
         x_full = np.concatenate([[1.0], x_test])
-
         beta = _stage_f_fit_ridge(X_full, y_train, lam)
         preds.append(float(x_full @ beta))
-
     preds_arr = np.asarray(preds, dtype=float)
     mae = float(np.mean(np.abs(preds_arr - y)))
     if len(preds_arr) >= 2 and float(np.std(preds_arr)) > 0 and float(np.std(y)) > 0:
@@ -821,13 +645,10 @@ def _stage_f_loo_metrics(X_raw: np.ndarray, y: np.ndarray, lam: float) -> tuple:
     else:
         loo_r = float("nan")
     return mae, loo_r
-
-
 @st.cache_resource
 def stage_f_load_predictor(corpus_path_str: str, lam: float) -> dict:
     """Load labeled_corpus.json, extract features for every labeled record,
     fit ridge with feature standardization, and return a predictor dict.
-
     Returns a dict with:
       available: bool
       reason: str — explanation if not available
@@ -846,7 +667,6 @@ def stage_f_load_predictor(corpus_path_str: str, lam: float) -> dict:
             corpus = json.load(fh)
     except Exception as e:
         return {"available": False, "reason": f"failed to read corpus: {e}"}
-
     X_rows, y_rows = [], []
     for rec in corpus:
         text = rec.get("text") or ""
@@ -858,22 +678,17 @@ def stage_f_load_predictor(corpus_path_str: str, lam: float) -> dict:
             y_rows.append(float(score))
         except Exception:
             continue
-
     if len(X_rows) < 10:
         return {"available": False, "reason": f"insufficient labeled docs ({len(X_rows)})"}
-
     X_raw = np.vstack(X_rows)
     y = np.asarray(y_rows, dtype=float)
-
     mu = X_raw.mean(axis=0)
     sigma = X_raw.std(axis=0)
     sigma = np.where(sigma < 1e-9, 1.0, sigma)
     Xn = (X_raw - mu) / sigma
     X_full = np.column_stack([np.ones(Xn.shape[0]), Xn])
-
     beta = _stage_f_fit_ridge(X_full, y, lam)
     loo_mae, loo_r = _stage_f_loo_metrics(X_raw, y, lam)
-
     return {
         "available": True,
         "reason": "",
@@ -885,8 +700,6 @@ def stage_f_load_predictor(corpus_path_str: str, lam: float) -> dict:
         "loo_r": loo_r,
         "feature_names": list(STAGE_F_FEATURE_NAMES),
     }
-
-
 def stage_f_predict_detailed(text: str, predictor: dict) -> dict:
     """Predict Originality human-score for `text` using the fitted ridge and
     return the full feature/contribution breakdown used in the score."""
@@ -920,17 +733,14 @@ def stage_f_predict_detailed(text: str, predictor: dict) -> dict:
             "feature_contrib": {},
             "intercept": 0.0,
         }
-
     mu = predictor["mu"]
     sigma = predictor["sigma"]
     beta = predictor["beta"]
-
     x_norm = (feats - mu) / sigma
     contribs = x_norm * beta[1:]
     raw = float(beta[0] + np.sum(contribs))
     clamped = max(0, min(100, int(round(raw))))
     band = stage_f_band(clamped)
-
     return {
         "available": True,
         "reason": "",
@@ -954,13 +764,9 @@ def stage_f_predict_detailed(text: str, predictor: dict) -> dict:
         },
         "intercept": round(float(beta[0]), 3),
     }
-
-
 def stage_f_predict(text: str, predictor: dict) -> dict:
     """Compact wrapper for UI/summary use; retains the detailed breakdown too."""
     return stage_f_predict_detailed(text, predictor)
-
-
 def write_stage_f_debug_report(
     predictor: dict,
     scored_items: list,
@@ -982,7 +788,6 @@ def write_stage_f_debug_report(
         )
         lines.append(f"Lambda: {STAGE_F_RIDGE_LAMBDA}")
     lines.append("")
-
     for idx, item in enumerate(scored_items, 1):
         pred = item.get("prediction", {})
         label = item.get("label", item.get("run_id", f"item_{idx}"))
@@ -997,13 +802,11 @@ def write_stage_f_debug_report(
             lines.append(f"   unavailable: {pred.get('reason', 'predictor not loaded')}")
             lines.append("")
             continue
-
         lines.append(
             f"   predicted={pred.get('predicted_score')} raw={pred.get('raw_score')} "
             f"band={pred.get('band')}"
         )
         lines.append(f"   intercept={pred.get('intercept', 0.0)}")
-
         feats = pred.get("features", {})
         zmap = pred.get("feature_z", {})
         cmap = pred.get("feature_contrib", {})
@@ -1015,7 +818,6 @@ def write_stage_f_debug_report(
             )
         for _abs_c, line in sorted(feature_lines, key=lambda t: t[0], reverse=True):
             lines.append(line)
-
         pos = [f"{k} {v:+.3f}" for k, v in sorted(cmap.items(), key=lambda kv: kv[1], reverse=True) if v > 0][:3]
         neg = [f"{k} {v:+.3f}" for k, v in sorted(cmap.items(), key=lambda kv: kv[1]) if v < 0][:3]
         if pos:
@@ -1023,11 +825,8 @@ def write_stage_f_debug_report(
         if neg:
             lines.append("   strongest downward pushes: " + "; ".join(neg))
         lines.append("")
-
     save_text(report_path, "\n".join(lines))
     return str(report_path)
-
-
 def stage_f_band(score: int) -> str:
     if score is None:
         return "UNAVAILABLE"
@@ -1036,7 +835,6 @@ def stage_f_band(score: int) -> str:
     if score >= STAGE_F_BAND_CAUTION:
         return "RECONSIDER"
     return "REGENERATE"
-
 # ============================================================================
 # Stage G — line-edit pass (mechanical copyedit + AI-tell deletion/graft)
 # ============================================================================
@@ -1074,71 +872,47 @@ def stage_f_band(score: int) -> str:
 # overwritten — both remain available. The edited text becomes the basis
 # for Stage F's prediction.
 # ============================================================================
-
-
 LINE_EDIT_MECHANICAL_PROMPT = """You are a strict copyeditor. Your job is to fix unambiguous punctuation errors in the text below and nothing else.
-
 Allowed edits:
 - Insert a comma before a coordinating conjunction (and, but, or, nor, for, so, yet) when it joins two independent clauses.
 - Fix comma splices (two independent clauses joined by only a comma) by replacing the comma with a semicolon or a period. If you use a period, capitalize the next word.
 - Add a missing apostrophe in a contraction or possessive.
 - Add missing end-of-sentence punctuation where the sentence structure clearly calls for it.
-
 Forbidden edits:
 - Do NOT change, add, remove, or reorder any words.
 - Do NOT break a sentence apart or merge sentences, except the comma-splice fix above.
 - Do NOT change spelling (British vs American, archaic vs modern).
 - Do NOT make stylistic changes, smoothing, or rewording.
 - Do NOT touch dialogue or internal quotes unless the fix is an unambiguous punctuation error.
-
 Return ONLY the corrected text. No preamble, no commentary, no markdown fencing.
-
 TEXT:
 {text}
 """
-
-
 LINE_EDIT_GRAFT_PROMPT = """A sentence in the TOP 1 draft contains an AI-tell construction that needs replacement. Your job is to find, in the runner-up drafts, a VERBATIM sentence that does the same narrative work but does not contain the flagged construction.
-
 FLAGGED SENTENCE (from TOP 1):
 {flagged_sentence}
-
 FLAGGED CONSTRUCTION:
 The word or phrase "{flagged_word}" used as an adjective, intensifier, or part of a named-state construction. The replacement must not reintroduce the same word or construction.
-
 SURROUNDING CONTEXT IN TOP 1 (for beat identification only):
 {context_before}
 >>> [FLAGGED SENTENCE] <<<
 {context_after}
-
 RUNNER-UP DRAFTS (same chapter, same outline, different generations):
-
 {alternative_drafts}
-
 For each runner-up draft, locate the sentence or short passage that covers the same beat as the flagged sentence — the same moment in the chapter, the same narrative function. If any of those same-beat sentences is clean of the flagged construction and does equivalent work, choose the cleanest one and return it verbatim.
-
 Return ONE of these two formats, with no other text:
-
 REPLACEMENT: <the replacement sentence, verbatim from the named runner-up>
 SOURCE: T<n>
-
 OR, if no runner-up has a same-beat sentence that is both clean of the flagged construction and does the same work:
-
 NO_REPLACEMENT
-
 Do not invent, paraphrase, or compose. The replacement must be a sentence that already exists in one of the runner-up drafts, copied character-for-character.
 """
-
-
 # ---- G1 helpers ------------------------------------------------------------
-
 def _word_sequence(text: str) -> list:
     """Return the list of words in order, ignoring punctuation and whitespace.
     Used for the invariant check after G1 — a valid mechanical edit preserves
     this list exactly."""
     return re.findall(r"\b[\w']+\b", text or "")
-
-
 def run_mechanical_copyedit(client, model: str, text: str) -> dict:
     """G1. One LLM call, punctuation-only edit, with word-sequence invariant
     check. Returns a dict:
@@ -1163,21 +937,17 @@ def run_mechanical_copyedit(client, model: str, text: str) -> dict:
     except Exception as e:
         out["reason"] = f"api error: {e}"
         return out
-
     raw = "\n".join(b.text for b in resp.content if getattr(b, "text", None))
     out["raw"] = raw
-
     candidate = raw.strip()
     # Strip accidental markdown fences if the model added any despite instructions
     if candidate.startswith("```"):
         candidate = re.sub(r"^```[a-zA-Z]*\n?", "", candidate)
         candidate = re.sub(r"\n?```$", "", candidate)
         candidate = candidate.strip()
-
     if not candidate:
         out["reason"] = "empty response"
         return out
-
     # Invariant: word sequence must match exactly (punctuation-only edit).
     orig_words = _word_sequence(text)
     edit_words = _word_sequence(candidate)
@@ -1196,16 +966,12 @@ def run_mechanical_copyedit(client, model: str, text: str) -> dict:
             )
         out["reason"] = f"word-sequence invariant violated ({first_diff})"
         return out
-
     if candidate == text:
         out["reason"] = "no changes"
         return out
-
     out["applied"] = True
     out["edited_text"] = candidate
     return out
-
-
 def _summarize_punctuation_diff(before: str, after: str) -> list:
     """Cheap summary of what punctuation was added/removed. Returns a list of
     short strings for the audit report."""
@@ -1224,10 +990,7 @@ def _summarize_punctuation_diff(before: str, after: str) -> list:
         elif delta < 0:
             changes.append(f"{delta} {name}{'s' if abs(delta) != 1 else ''}")
     return changes
-
-
 # ---- G2 helpers ------------------------------------------------------------
-
 def _split_sentences_with_spans(text: str) -> list:
     """Return list of (sentence_text, start_idx, end_idx) across the whole
     text. Sentence boundary: [.!?] followed by whitespace or end-of-text."""
@@ -1242,8 +1005,6 @@ def _split_sentences_with_spans(text: str) -> list:
         if sent.strip():
             spans.append((sent, start, end))
     return spans
-
-
 def find_ai_tell_sentences(text: str, ai_tell_words: dict) -> list:
     """G2. Return list of dicts for each sentence containing an AI-tell.
     Each dict has: sentence, start, end, flagged_word, match_text."""
@@ -1268,10 +1029,7 @@ def find_ai_tell_sentences(text: str, ai_tell_words: dict) -> list:
                 # Don't double-count the same sentence under different words
                 break
     return flagged
-
-
 # ---- G3b helpers -----------------------------------------------------------
-
 def apply_deletion_heuristic(sentence: str, ai_tell_words: dict) -> tuple:
     """G3b. Apply all deletion patterns to the sentence, run a/an article
     agreement repair, and collapse doubled whitespace. Returns
@@ -1289,7 +1047,6 @@ def apply_deletion_heuristic(sentence: str, ai_tell_words: dict) -> tuple:
                     "after": new_result,
                 })
                 result = new_result
-
     # a/an article repair. Only touch instances that are lowercase (leave
     # sentence-initial "A" alone unless it clearly needs repair — rare).
     result = re.sub(
@@ -1310,10 +1067,7 @@ def apply_deletion_heuristic(sentence: str, ai_tell_words: dict) -> tuple:
     if trailing:
         result = result.rstrip() + sentence[-trailing:]
     return result, edits
-
-
 # ---- G3a helpers -----------------------------------------------------------
-
 def _context_around(text: str, start: int, end: int, window_chars: int = 400) -> tuple:
     """Return (before_context, after_context) trimmed to the nearest paragraph
     or sentence boundary within window_chars of each side."""
@@ -1325,8 +1079,6 @@ def _context_around(text: str, start: int, end: int, window_chars: int = 400) ->
     if "\n\n" in after_raw:
         after_raw = after_raw.rsplit("\n\n", 1)[0]
     return before_raw.strip(), after_raw.strip()
-
-
 def try_same_beat_graft(
     client,
     model: str,
@@ -1344,11 +1096,9 @@ def try_same_beat_graft(
         reason: str           — short explanation of the outcome
     """
     out = {"replacement": "", "source": "", "raw": "", "reason": ""}
-
     if not runner_up_drafts:
         out["reason"] = "no runner-up drafts available"
         return out
-
     before_ctx, after_ctx = _context_around(
         full_text, sentence_start, sentence_end
     )
@@ -1364,7 +1114,6 @@ def try_same_beat_graft(
         context_after=after_ctx,
         alternative_drafts="\n\n".join(alt_blocks),
     )
-
     try:
         resp = client.messages.create(
             model=model,
@@ -1374,30 +1123,24 @@ def try_same_beat_graft(
     except Exception as e:
         out["reason"] = f"api error: {e}"
         return out
-
     raw = "\n".join(b.text for b in resp.content if getattr(b, "text", None))
     out["raw"] = raw
-
     if re.search(r"\bNO_REPLACEMENT\b", raw):
         out["reason"] = "evaluator returned NO_REPLACEMENT"
         return out
-
     rep_m = re.search(
         r"REPLACEMENT:\s*(.+?)(?:\nSOURCE:|\Z)",
         raw,
         flags=re.DOTALL | re.IGNORECASE,
     )
     src_m = re.search(r"SOURCE:\s*T\s*(\d+)", raw, flags=re.IGNORECASE)
-
     if not rep_m:
         out["reason"] = "could not parse REPLACEMENT line"
         return out
-
     candidate = rep_m.group(1).strip().strip('"').strip()
     if not candidate:
         out["reason"] = "empty REPLACEMENT"
         return out
-
     # Verify the candidate is verbatim in one of the runner-up drafts. This
     # guards against the model paraphrasing or inventing.
     verified_source = ""
@@ -1405,18 +1148,15 @@ def try_same_beat_graft(
         if candidate in d.get("text", ""):
             verified_source = f"T{i}"
             break
-
     if not verified_source:
         out["reason"] = "candidate not found verbatim in any runner-up draft"
         return out
-
     # Verify the replacement is clean of the flagged construction
     patterns = AI_TELL_WORDS.get(flagged_word, [])
     for pat, _repl in patterns:
         if re.search(pat, candidate, flags=re.IGNORECASE):
             out["reason"] = "candidate still contains the flagged construction"
             return out
-
     if src_m:
         claimed = f"T{src_m.group(1)}"
         out["source"] = claimed if claimed == verified_source else verified_source
@@ -1425,10 +1165,7 @@ def try_same_beat_graft(
     out["replacement"] = candidate
     out["reason"] = "graft accepted"
     return out
-
-
 # ---- Stage G orchestrator --------------------------------------------------
-
 def run_line_edit_pass(
     client,
     eval_model: str,
@@ -1440,7 +1177,6 @@ def run_line_edit_pass(
     """Orchestrate G1 → G2 → G3 on `final_text`. Writes the edited text and
     an audit report to FINAL_DIR. Does not overwrite the original final_text
     file. Returns a dict usable by write_batch_summary and the UI.
-
     Args:
         final_text: the text produced by Stage D (TOP 1 or TOP1_GRAFTED).
         all_acceptable_drafts: drafts that cleared Q1 (used for G3a graft
@@ -1461,15 +1197,12 @@ def run_line_edit_pass(
         "report_path": "",
         "changed": False,
     }
-
     if not STAGE_G_ENABLED:
         result["ran"] = False
         return result
-
     if not final_text or not final_text.strip():
         result["ran"] = False
         return result
-
     # --- G1: mechanical copyedit ---
     mech = run_mechanical_copyedit(client, eval_model, final_text)
     result["mechanical"] = {
@@ -1483,23 +1216,19 @@ def run_line_edit_pass(
         current_text = mech["edited_text"]
     else:
         current_text = final_text
-
     # --- G2: AI-tell identification ---
     flagged = find_ai_tell_sentences(current_text, AI_TELL_WORDS)
     result["flagged_count"] = len(flagged)
-
     # --- G3: resolve each flagged sentence ---
     runner_up_drafts = [
         d for d in (all_acceptable_drafts or [])
         if d.get("run_id") != top1_run_id
     ]
-
     # Re-compute sentence spans against current_text as edits are applied;
     # rebuild the flagged list from the updated text before each step so
     # positions stay correct.
     remaining = list(flagged)
     resolved = []
-
     while remaining:
         # Find the first flagged sentence in the current text
         fs = None
@@ -1521,10 +1250,8 @@ def run_line_edit_pass(
                     "source": "",
                 })
             break
-
         remaining.remove(fs)
         sent_text = fs["sentence"]
-
         # Locate sentence in current_text for context extraction
         idx = current_text.find(sent_text)
         if idx < 0:
@@ -1539,7 +1266,6 @@ def run_line_edit_pass(
                 "source": "",
             })
             continue
-
         entry = {
             "original_sentence": sent_text,
             "flagged_word": fs["flagged_word"],
@@ -1550,7 +1276,6 @@ def run_line_edit_pass(
             "graft_reason": "",
             "source": "",
         }
-
         # G3a: try same-beat graft
         graft = try_same_beat_graft(
             client, eval_model,
@@ -1560,7 +1285,6 @@ def run_line_edit_pass(
         )
         entry["graft_raw"] = graft.get("raw", "")
         entry["graft_reason"] = graft.get("reason", "")
-
         if graft.get("replacement"):
             new_text = current_text.replace(sent_text, graft["replacement"], 1)
             if new_text != current_text:
@@ -1570,7 +1294,6 @@ def run_line_edit_pass(
                 entry["source"] = graft.get("source", "")
                 resolved.append(entry)
                 continue
-
         # G3b: deletion heuristic
         deleted, edits_made = apply_deletion_heuristic(sent_text, AI_TELL_WORDS)
         if edits_made and deleted != sent_text:
@@ -1581,26 +1304,21 @@ def run_line_edit_pass(
                 entry["replacement"] = deleted
                 resolved.append(entry)
                 continue
-
         # G3c: flag for manual review
         entry["action"] = "flag_for_rewrite"
         resolved.append(entry)
-
     result["flagged_sentences"] = resolved
     result["edited_text"] = current_text
     result["changed"] = current_text != final_text
-
     # --- Save outputs ---
     try:
         ensure_dirs()
     except Exception:
         pass
-
     if result["changed"]:
         edited_path = FINAL_DIR / f"FINAL_{batch_stub}_LINEEDITED.txt"
         save_text(edited_path, current_text)
         result["edited_path"] = str(edited_path)
-
     # Always write the report, even when no edits were applied — it
     # documents what was looked at.
     report_lines = []
@@ -1639,14 +1357,10 @@ def run_line_edit_pass(
         if entry.get("graft_reason"):
             report_lines.append(f"    Graft notes: {entry['graft_reason']}")
         report_lines.append("")
-
     report_path = FINAL_DIR / f"LINEEDIT_REPORT_{batch_stub}.txt"
     save_text(report_path, "\n".join(report_lines))
     result["report_path"] = str(report_path)
-
     return result
-
-
 # ============================================================================
 # Originality color ranker — deterministic, no LLM
 #
@@ -1675,12 +1389,8 @@ def run_line_edit_pass(
 #   (the "bimodal composed register" problem). Selecting for strong green
 #   actively steers toward worse drafts.
 # ============================================================================
-
 import zipfile
-
 _ORIG_HEX_FILL_RE = re.compile(r'w:fill="([0-9A-Fa-f]{6})"')
-
-
 def _classify_originality_fill(hex_color: str) -> str:
     """Classify a single hex fill by its green-vs-orange offset."""
     r = int(hex_color[0:2], 16)
@@ -1695,46 +1405,37 @@ def _classify_originality_fill(hex_color: str) -> str:
     if diff >= -15:
         return "mild_orange"
     return "STRONG_ORANGE"
-
-
 def _extract_originality_fills(docx_bytes: bytes) -> List[str]:
     """Extract w:fill hex values from an Originality-exported docx, in order."""
     with zipfile.ZipFile(io.BytesIO(docx_bytes)) as z:
         with z.open("word/document.xml") as f:
             xml = f.read().decode("utf-8", errors="replace")
     return _ORIG_HEX_FILL_RE.findall(xml)
-
-
 def compute_originality_metrics(docx_bytes: bytes) -> dict:
     """Compute ranking metrics for a single Originality-exported docx.
-
     Returns a dict with the per-class counts, strong-orange cluster
     statistics, and the final rank_score.
     """
     fills = _extract_originality_fills(docx_bytes)
     classes = [_classify_originality_fill(h) for h in fills]
-
     counts = {
         "STRONG_GREEN": 0, "mild_green": 0, "neutral": 0,
         "mild_orange": 0, "STRONG_ORANGE": 0,
     }
     for c in classes:
         counts[c] += 1
-
     short = "".join("O" if c == "STRONG_ORANGE" else "." for c in classes)
     run_lens = [len(r) for r in re.findall(r"O+", short)]
     longest_O = max(run_lens) if run_lens else 0
     in_clusters = sum(l for l in run_lens if l >= 2)
     total_O = counts["STRONG_ORANGE"]
     avg_cluster = (sum(run_lens) / len(run_lens)) if run_lens else 0.0
-
     score = (
         -(longest_O ** 2) * 3.0
         - in_clusters
         - total_O * 0.3
         + (counts["mild_green"] - counts["mild_orange"]) * 0.5
     )
-
     return {
         "total_runs": len(fills),
         "strong_green": counts["STRONG_GREEN"],
@@ -1747,8 +1448,6 @@ def compute_originality_metrics(docx_bytes: bytes) -> dict:
         "avg_strong_O_cluster": round(avg_cluster, 2),
         "rank_score": round(score, 2),
     }
-
-
 def _extract_text_from_docx_bytes(docx_bytes: bytes) -> str:
     """Extract plain text from a docx file (for matching to stored drafts)."""
     try:
@@ -1761,21 +1460,16 @@ def _extract_text_from_docx_bytes(docx_bytes: bytes) -> str:
         return text
     except Exception:
         return ""
-
-
 def _normalize_for_matching(text: str) -> str:
     """Aggressive normalization for text-overlap matching."""
     text = re.sub(r"\s+", " ", text).strip().lower()
     # Strip punctuation that Originality sometimes reformats
     text = re.sub(r"[\u2018\u2019\u201c\u201d\u2013\u2014'\",.?!;:()]", "", text)
     return text
-
-
 def match_originality_docx_to_draft(
     docx_bytes: bytes, candidate_drafts: list
 ) -> Optional[str]:
     """Match an uploaded Originality docx to a run_id in candidate_drafts.
-
     Uses text-overlap matching: the uploaded doc's first 400 characters of
     plain text (normalized) are checked against each candidate draft's
     normalized text. Returns the best-matching run_id, or None if no
@@ -1784,17 +1478,14 @@ def match_originality_docx_to_draft(
     orig_text = _extract_text_from_docx_bytes(docx_bytes)
     if not orig_text:
         return None
-
     norm_orig = _normalize_for_matching(orig_text)
     if len(norm_orig) < 100:
         return None
-
     # Use a distinctive signature from the middle of the doc, where
     # Originality's headers/footers are less likely to interfere.
     sig_start = min(200, len(norm_orig) // 4)
     sig_end = min(sig_start + 400, len(norm_orig))
     sig = norm_orig[sig_start:sig_end]
-
     best_run_id = None
     best_score = 0
     for d in candidate_drafts:
@@ -1810,21 +1501,16 @@ def match_originality_docx_to_draft(
         if overlap > best_score:
             best_score = overlap
             best_run_id = d.get("run_id")
-
     # Require at least 3 window hits to count as a match (~180 chars overlap)
     return best_run_id if best_score >= 3 else None
-
-
 def rank_by_originality_reports(
     reports_by_run_id: dict, candidate_drafts: list
 ) -> list:
     """Rank drafts by Originality color-based score, highest first.
-
     Arguments:
         reports_by_run_id: {run_id: metrics_dict} — output of
                            compute_originality_metrics for each report.
         candidate_drafts: the drafts list from the batch, used for filenames.
-
     Returns a list of dicts:
         [{"run_id": ..., "rank_score": ..., "metrics": {...}, "rank": 1, ...}]
     sorted by rank_score descending.
@@ -1840,22 +1526,15 @@ def rank_by_originality_reports(
     for i, row in enumerate(rows, 1):
         row["rank"] = i
     return rows
-
-
 # ============================================================================
 # File I/O
 # ============================================================================
-
 def ensure_dirs():
     RUNS_DIR.mkdir(exist_ok=True)
     OUTPUTS_DIR.mkdir(exist_ok=True)
     FINAL_DIR.mkdir(exist_ok=True)
-
-
 def save_text(path: Path, text: str):
     path.write_text(text, encoding="utf-8")
-
-
 def load_csv(path: Path) -> pd.DataFrame:
     if path.exists() and path.stat().st_size > 0:
         df = pd.read_csv(path, dtype=str)
@@ -1864,15 +1543,11 @@ def load_csv(path: Path) -> pd.DataFrame:
                 df[col] = ""
         return df
     return pd.DataFrame(columns=RUN_FIELDS)
-
-
 def append_record(path: Path, record: RunRecord):
     df = load_csv(path)
     new_row = pd.DataFrame([asdict(record)])
     df = pd.concat([df, new_row], ignore_index=True)
     df.to_csv(path, index=False)
-
-
 def update_record(path: Path, run_id: str, updates: dict):
     df = load_csv(path)
     mask = df["run_id"].astype(str) == str(run_id)
@@ -1881,8 +1556,6 @@ def update_record(path: Path, run_id: str, updates: dict):
             df[k] = df[k].astype(object)
         df.loc[mask, k] = v
     df.to_csv(path, index=False)
-
-
 def update_records_bulk(path: Path, run_ids: list, updates: dict):
     df = load_csv(path)
     mask = df["run_id"].astype(str).isin([str(r) for r in run_ids])
@@ -1891,8 +1564,6 @@ def update_records_bulk(path: Path, run_ids: list, updates: dict):
             df[k] = df[k].astype(object)
         df.loc[mask, k] = v
     df.to_csv(path, index=False)
-
-
 def extract_text_from_upload(uploaded_file) -> str:
     name = uploaded_file.name.lower()
     try:
@@ -1907,16 +1578,11 @@ def extract_text_from_upload(uploaded_file) -> str:
     except Exception as e:
         st.warning(f"Could not read {uploaded_file.name}: {e}")
     return ""
-
-
 # ============================================================================
 # API key loading
 # ============================================================================
-
 def clean_api_key(value: str) -> str:
     return value.strip().strip("'\"").strip()
-
-
 def load_api_key() -> tuple[str, str]:
     try:
         if "ANTHROPIC_API_KEY" in st.secrets:
@@ -1925,18 +1591,13 @@ def load_api_key() -> tuple[str, str]:
                 return key, "Streamlit secrets"
     except Exception:
         pass
-
     env_key = clean_api_key(os.environ.get("ANTHROPIC_API_KEY", ""))
     if env_key:
         return env_key, "environment variable"
-
     return "", ""
-
-
 # ============================================================================
 # Prompt loading
 # ============================================================================
-
 def load_prompts() -> pd.DataFrame:
     path = Path(PROMPTS_CSV)
     if not path.exists():
@@ -1948,18 +1609,13 @@ def load_prompts() -> pd.DataFrame:
     if "category" not in df.columns:
         df["category"] = ""
     return df
-
-
 # ============================================================================
 # Payload construction
 # ============================================================================
-
 SYSTEM_PROMPT = (
     "Follow the user's instructions exactly. "
     "Do not add commentary, headers, or meta-text to your response."
 )
-
-
 def build_payload_text(prompt_text: str, doc_texts: dict) -> str:
     parts = [prompt_text.strip()]
     for label, text in doc_texts.items():
@@ -1970,8 +1626,6 @@ def build_payload_text(prompt_text: str, doc_texts: dict) -> str:
         "with normal paragraph breaks and no commentary."
     )
     return "\n".join(parts)
-
-
 def build_message_blocks(prompt_text: str, doc_texts: dict) -> list:
     blocks = [{"type": "text", "text": prompt_text.strip()}]
     for label, text in doc_texts.items():
@@ -1988,12 +1642,9 @@ def build_message_blocks(prompt_text: str, doc_texts: dict) -> list:
         ),
     })
     return blocks
-
-
 # ============================================================================
 # Generation
 # ============================================================================
-
 def generate_chapter(client, model: str, temperature: float, message_blocks: list) -> str:
     resp = client.messages.create(
         model=model,
@@ -2003,8 +1654,6 @@ def generate_chapter(client, model: str, temperature: float, message_blocks: lis
         messages=[{"role": "user", "content": message_blocks}],
     )
     return "\n".join(b.text for b in resp.content if getattr(b, "text", None))
-
-
 def generate_quality_gated_batch(
     client,
     gen_model: str,
@@ -2026,7 +1675,6 @@ def generate_quality_gated_batch(
     outline_text = doc_uploads.get("Outline", "")
     payload_text = build_payload_text(prompt_text, doc_uploads)
     message_blocks = build_message_blocks(prompt_text, doc_uploads)
-
     slots = []
     slot_no = 0
     for temp in temperatures:
@@ -2039,7 +1687,6 @@ def generate_quality_gated_batch(
                 "attempts": 0,
                 "draft": None,
             })
-
     total_slots = len(slots)
     if total_slots == 0:
         return {
@@ -2052,20 +1699,17 @@ def generate_quality_gated_batch(
             "quality_gate_history": [],
             "halt_reason": "No draft slots requested.",
         }
-
     scan_by_run_id = {}
     all_run_ids = []
     generated_count = 0
     round_no = 0
     quality_gate_history = []
     locked_target_quality_score = None
-
     while round_no < max_tries:
         round_no += 1
         open_slots = [s for s in slots if s["draft"] is None and s["attempts"] < max_tries]
         if not open_slots:
             break
-
         for slot in open_slots:
             slot["attempts"] += 1
             generated_count += 1
@@ -2075,12 +1719,10 @@ def generate_quality_gated_batch(
                 f"attempt {slot['attempts']}/{max_tries} · "
                 f"generated {generated_count}"
             )
-
             stub = make_file_stub(prompt_id, slot["temp"], gen_model)
             run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:20]
             payload_path = OUTPUTS_DIR / f"{stub}_payload.txt"
             save_text(payload_path, payload_text)
-
             try:
                 output = generate_chapter(client, gen_model, slot["temp"], message_blocks)
             except Exception as e:
@@ -2091,13 +1733,11 @@ def generate_quality_gated_batch(
                 slot["draft"] = None
                 progress.progress(min(0.99, generated_count / max(total_slots * max_tries, 1)))
                 continue
-
             output_path = OUTPUTS_DIR / f"{stub}_output.txt"
             save_text(output_path, output)
             scan_result = scan_draft(output)
             scan_by_run_id[run_id] = scan_result
             all_run_ids.append(run_id)
-
             meta = {
                 "run_id": run_id,
                 "prompt_id": prompt_id,
@@ -2113,7 +1753,6 @@ def generate_quality_gated_batch(
             }
             meta_path = OUTPUTS_DIR / f"{stub}_meta.json"
             save_text(meta_path, json.dumps(meta, indent=2))
-
             record = RunRecord(
                 run_id=run_id,
                 timestamp=datetime.now().isoformat(),
@@ -2129,7 +1768,6 @@ def generate_quality_gated_batch(
                 **{k: v for k, v in scan_result.items() if k in RUN_FIELDS},
             )
             append_record(csv_path, record)
-
             if github_cfg.get("configured"):
                 try:
                     github_push_after_generation(
@@ -2137,7 +1775,6 @@ def generate_quality_gated_batch(
                     )
                 except Exception as push_exc:
                     status.warning(f"GitHub push failed: {push_exc}")
-
             slot["draft"] = {
                 "run_id": run_id,
                 "text": output,
@@ -2149,11 +1786,9 @@ def generate_quality_gated_batch(
             }
             progress.progress(min(0.99, generated_count / max(total_slots * max_tries, 1)))
             time.sleep(0.2)
-
         current_drafts = [s["draft"] for s in slots if s["draft"] is not None]
         if not current_drafts:
             continue
-
         lit = evaluate_drafts_with_anthropic(
             client, eval_model, current_drafts,
             outline_text=outline_text,
@@ -2177,7 +1812,6 @@ def generate_quality_gated_batch(
             rid for rid in acceptable_ids
             if int(quality_scores.get(rid, 0) or 0) >= target_quality_score
         ]
-
         for slot in slots:
             d = slot.get("draft")
             if not d:
@@ -2199,7 +1833,6 @@ def generate_quality_gated_batch(
             else:
                 update_record(csv_path, rid, {"pipeline_role": "discarded_below_top_quality"})
                 slot["draft"] = None
-
         retained_count = len([s for s in slots if s["draft"] is not None])
         quality_gate_history.append({
             "round": round_no,
@@ -2210,16 +1843,13 @@ def generate_quality_gated_batch(
             "target_quality_score": int(target_quality_score),
             "retained_run_ids": retained_ids[:],
         })
-
         status.info(
             f"Quality gate round {round_no}/{max_tries} complete · "
             f"retained {retained_count}/{total_slots} at target writing score {target_quality_score} "
             f"(round top {top_quality_score})"
         )
-
         if retained_count >= total_slots:
             break
-
     final_drafts = [s["draft"] for s in slots if s["draft"] is not None]
     retained_run_ids = [d["run_id"] for d in final_drafts]
     halt_reason = ""
@@ -2228,7 +1858,6 @@ def generate_quality_gated_batch(
             f"Quality gate stopped after {max_tries} tries. "
             f"Retained {len(final_drafts)} of {total_slots} requested top-score drafts."
         )
-
     return {
         "final_drafts": final_drafts,
         "scan_by_run_id": scan_by_run_id,
@@ -2240,18 +1869,14 @@ def generate_quality_gated_batch(
         "target_quality_score": int(locked_target_quality_score or 0),
         "halt_reason": halt_reason,
     }
-
-
 # ============================================================================
 # Literary evaluation — unchanged shape; adds strong-beat extraction
 # ============================================================================
-
 def evaluate_drafts_with_anthropic(
     client, model: str, drafts: list,
     outline_text: str = "", scan_by_run_id: dict = None,
 ) -> dict:
     n = len(drafts)
-
     scanner_lines = []
     for i, d in enumerate(drafts, 1):
         scan = (scan_by_run_id or {}).get(d["run_id"], {})
@@ -2272,9 +1897,7 @@ def evaluate_drafts_with_anthropic(
                 f"Draft {i} (run_id: {d['run_id']}): "
                 f"word_count={len(d['text'].split())}, scanner data not available"
             )
-
     scanner_text = "\n".join(scanner_lines)
-
     parts = [
         EVALUATOR_PROMPT.format(N=n),
         "\n\n",
@@ -2285,14 +1908,12 @@ def evaluate_drafts_with_anthropic(
     ]
     for i, d in enumerate(drafts, 1):
         parts.append(f"=== DRAFT {i} (run_id: {d['run_id']}) ===\n\n{d['text']}\n\n")
-
     resp = client.messages.create(
         model=model,
         max_tokens=MAX_EVAL_TOKENS,
         messages=[{"role": "user", "content": "".join(parts)}],
     )
     raw = "\n".join(b.text for b in resp.content if getattr(b, "text", None))
-
     quality_by_index = {}
     quality_pattern = re.compile(
         r"QUALITY:\s*Draft\s*(\d+)\s*[—-]+\s*(ACCEPTABLE|UNACCEPTABLE)"
@@ -2305,14 +1926,12 @@ def evaluate_drafts_with_anthropic(
         reason = (m.group(3) or "").strip()
         if 1 <= idx <= n:
             quality_by_index[idx] = {"verdict": verdict, "reason": reason}
-
     for i in range(1, n + 1):
         if i not in quality_by_index:
             quality_by_index[i] = {
                 "verdict": "ACCEPTABLE",
                 "reason": "(no explicit verdict in evaluator output; defaulted to ACCEPTABLE)",
             }
-
     quality_score_by_index = {}
     score_pattern = re.compile(
         r"QUALITY_SCORE:\s*Draft\s*(\d+)\s*[—-]+\s*(-?\d+)(?=\n|$)",
@@ -2326,7 +1945,6 @@ def evaluate_drafts_with_anthropic(
             if quality_by_index[idx]["verdict"] == "UNACCEPTABLE":
                 score = 0
             quality_score_by_index[idx] = score
-
     parse_status = "clean"
     ranking = []
     rank_match = re.search(r"RANKING:\s*([0-9,\s]+)", raw)
@@ -2341,7 +1959,6 @@ def evaluate_drafts_with_anthropic(
         ranking = [x for x in deduped if quality_by_index[x]["verdict"] == "ACCEPTABLE"]
     else:
         parse_status = "no_ranking_line"
-
     if ranking:
         fallback_map = {}
         current = 10
@@ -2355,7 +1972,6 @@ def evaluate_drafts_with_anthropic(
             if quality_by_index[i]["verdict"] == "ACCEPTABLE"
         ]
         fallback_map = {idx: 10 for idx in acceptable_idxs}
-
     for i in range(1, n + 1):
         if i in quality_score_by_index:
             continue
@@ -2365,7 +1981,6 @@ def evaluate_drafts_with_anthropic(
             quality_score_by_index[i] = fallback_map.get(i, 10)
             if parse_status == "clean":
                 parse_status = "partial_missing_quality_score"
-
     acceptable_idxs = [
         i for i in range(1, n + 1)
         if quality_by_index[i]["verdict"] == "ACCEPTABLE"
@@ -2375,7 +1990,6 @@ def evaluate_drafts_with_anthropic(
         i for i in acceptable_idxs
         if quality_score_by_index[i] == top_quality_score
     ]
-
     if ranking:
         ranking = [x for x in ranking if x in top_quality_idxs]
         missing_top = [i for i in top_quality_idxs if i not in ranking]
@@ -2384,10 +1998,8 @@ def evaluate_drafts_with_anthropic(
             parse_status = "partial"
     else:
         ranking = top_quality_idxs[:]
-
     if not ranking:
         ranking = top_quality_idxs[:] if top_quality_idxs else acceptable_idxs[:]
-
     winner_match = re.search(r"WINNER:\s*(\d+)", raw)
     if winner_match:
         winner_idx = int(winner_match.group(1))
@@ -2395,18 +2007,15 @@ def evaluate_drafts_with_anthropic(
         winner_idx = ranking[0] if ranking else 1
         if parse_status == "clean":
             parse_status = "no_winner_line"
-
     if winner_idx not in ranking:
         winner_idx = ranking[0] if ranking else winner_idx
     winner_idx = max(1, min(winner_idx, n))
     winner_run_id = drafts[winner_idx - 1]["run_id"]
-
     quality_by_run_id = {}
     quality_score_by_run_id = {}
     for i, d in enumerate(drafts, 1):
         quality_by_run_id[d["run_id"]] = quality_by_index[i]
         quality_score_by_run_id[d["run_id"]] = int(quality_score_by_index[i])
-
     return {
         "winner_run_id": winner_run_id,
         "winner_index": winner_idx,
@@ -2421,22 +2030,17 @@ def evaluate_drafts_with_anthropic(
         "parse_status": parse_status,
         "model": model,
     }
-
-
 # ============================================================================
 # Line-graft — identify runner-up sentences, apply via string replacement
 # ============================================================================
-
 def parse_graft_candidates(raw: str) -> list:
     """Parse CANDIDATE blocks from the Stage-1 identification response.
-
     Returns list of dicts with keys:
       n, graft_type, unit, top1_text, donor_draft, donor_text,
       function, justification.
     """
     if "NO_CANDIDATES" in raw:
         return []
-
     candidates = []
     sections = re.split(r"CANDIDATE\s+(\d+)\s*\n", raw)
     # sections alternates: [preamble, "1", block1, "2", block2, ...]
@@ -2446,7 +2050,6 @@ def parse_graft_candidates(raw: str) -> list:
         except ValueError:
             continue
         block = sections[i + 1] if i + 1 < len(sections) else ""
-
         type_m = re.search(r"TYPE:\s*([AB])", block)
         unit_m = re.search(r"UNIT:\s*(sentence|phrase)", block, re.I)
         # TOP1_TEXT spans to the next DONOR_DRAFT: label
@@ -2462,7 +2065,6 @@ def parse_graft_candidates(raw: str) -> list:
         )
         function_m = re.search(r"FUNCTION:\s*(.+)", block)
         justif_m = re.search(r"JUSTIFICATION:\s*(.+)", block)
-
         if top1_m and donor_text_m and donor_draft_m:
             candidates.append({
                 "n": n,
@@ -2474,14 +2076,10 @@ def parse_graft_candidates(raw: str) -> list:
                 "function": function_m.group(1).strip() if function_m else "",
                 "justification": justif_m.group(1).strip() if justif_m else "",
             })
-
     return candidates
-
-
 def parse_graft_commits(raw: str):
     """Parse COMMIT_CANDIDATE blocks and the FINAL_GRAFTS list from the
     Stage-2 commit response.
-
     Returns (commits, final_ids) where commits is a list of committed-graft
     dicts (DECISION=COMMIT only) with keys in the legacy shape:
       n, graft_type, unit, source_draft, replace, with_text, seam_edits,
@@ -2495,11 +2093,9 @@ def parse_graft_commits(raw: str):
         except ValueError:
             continue
         block = sections[i + 1] if i + 1 < len(sections) else ""
-
         decision_m = re.search(r"DECISION:\s*(COMMIT|REJECT)", block, re.I)
         if not decision_m or decision_m.group(1).upper() != "COMMIT":
             continue
-
         type_m = re.search(r"TYPE:\s*([AB])", block)
         unit_m = re.search(r"UNIT:\s*(sentence|phrase)", block, re.I)
         top1_m = re.search(
@@ -2516,7 +2112,6 @@ def parse_graft_commits(raw: str):
             block, re.DOTALL,
         )
         reason_m = re.search(r"REASON:\s*(.+)", block)
-
         if top1_m and donor_text_m and donor_draft_m:
             commits.append({
                 "n": n,
@@ -2528,7 +2123,6 @@ def parse_graft_commits(raw: str):
                 "seam_edits": seam_m.group(1).strip() if seam_m else "none",
                 "reason": reason_m.group(1).strip() if reason_m else "",
             })
-
     # FINAL_GRAFTS is authoritative when present.
     fg_m = re.search(r"FINAL_GRAFTS:\s*(.+?)(?:\n|$)", raw)
     if fg_m:
@@ -2538,11 +2132,8 @@ def parse_graft_commits(raw: str):
         final_ids = [int(x) for x in re.findall(r"\d+", fg_text)]
         commits = [c for c in commits if c["n"] in final_ids]
         return commits, final_ids
-
     # No FINAL_GRAFTS — trust per-candidate DECISIONs.
     return commits, [c["n"] for c in commits]
-
-
 def _format_candidates_for_commit(candidates: list) -> str:
     """Render the Stage-1 candidate list into the CANDIDATES_BLOCK section
     injected into the Stage-2 commit prompt.
@@ -2559,8 +2150,6 @@ def _format_candidates_for_commit(candidates: list) -> str:
         lines.append(f"JUSTIFICATION: {c['justification']}")
         lines.append("")
     return "\n".join(lines)
-
-
 def _build_winner_flags_text(winner_scan: dict) -> str:
     """Turn the winner's scan_flagged_passages JSON into human-readable lines
     for injection into the line-graft prompt.
@@ -2580,8 +2169,6 @@ def _build_winner_flags_text(winner_scan: dict) -> str:
         ctx = f.get("context", "").strip()
         lines.append(f"- [{rule}] …{ctx}…")
     return "\n".join(lines)
-
-
 def _build_scanner_summary_text(drafts_ranked: list, scan_by_run_id: dict) -> str:
     """One line per draft with hard-cap counts, in rank order."""
     lines = []
@@ -2601,8 +2188,6 @@ def _build_scanner_summary_text(drafts_ranked: list, scan_by_run_id: dict) -> st
             f"emotion_naming={scan.get('scan_emotion_naming_count', 0)}"
         )
     return "\n".join(lines)
-
-
 def _donor_sentence_is_clean(donor_sentence: str) -> bool:
     """Reject a proposed donor sentence if it itself contains any hard-cap
     pattern. This enforces the prompt's condition 3 deterministically in
@@ -2621,8 +2206,6 @@ def _donor_sentence_is_clean(donor_sentence: str) -> bool:
     if EMOTION_NAMING_PATTERN.search(donor_sentence):
         return False
     return True
-
-
 def run_line_graft_experiment(
     client,
     eval_model: str,
@@ -2633,22 +2216,18 @@ def run_line_graft_experiment(
     """Identify runner-up sentences or clauses that improve TOP 1, judge
     each for commit, then apply the committed set via deterministic string
     replacement.
-
     Two-stage LLM pass + one deterministic substitution step:
       Stage 1 (LLM): wide-net candidate identification.
       Stage 2 (LLM): commit/reject per candidate with seam-edit handling.
       Stage 3 (code): find-and-replace on TOP 1 for each committed graft.
-
     Two graft pathways:
       Type A — Flag Repair: TOP 1 carries a flagged construction at the
                same narrative function as a clean donor.
       Type B — Quality Upgrade: donor is meaningfully better at the same
                narrative function, regardless of whether TOP 1 is flagged.
-
     Two graft units:
       sentence — whole-sentence replacement.
       phrase   — clause-level replacement inside a TOP 1 sentence.
-
     Args:
         drafts_ranked: list of draft dicts in ranking order
                        (index 0 = TOP 1). Each has 'run_id' and 'text'.
@@ -2658,7 +2237,6 @@ def run_line_graft_experiment(
                         that themselves carry hard-cap patterns get
                         rejected deterministically.
         batch_stub: for file naming.
-
     Returns dict with:
       - grafted: bool
       - grafts: list of applied graft dicts
@@ -2688,18 +2266,15 @@ def run_line_graft_experiment(
         "raw_commits": "",
         "raw": "",
     }
-
     n = len(drafts_ranked)
     if n < 2:
         return result
-
     winner_run_id = drafts_ranked[0]["run_id"]
     winner_scan = (scan_by_run_id or {}).get(winner_run_id, {})
     winner_flags_text = _build_winner_flags_text(winner_scan)
     scanner_summary_text = _build_scanner_summary_text(
         drafts_ranked, scan_by_run_id,
     )
-
     # Build the drafts block once — reused for both Stage-1 and Stage-2 calls.
     drafts_block_parts = []
     for i, d in enumerate(drafts_ranked, 1):
@@ -2708,7 +2283,6 @@ def run_line_graft_experiment(
             f"\n\n=== DRAFT {i} ({label}, run_id: {d['run_id']}) ===\n\n{d['text']}"
         )
     drafts_block = "".join(drafts_block_parts)
-
     # --- Stage 1: candidate identification ---
     cand_prompt = LINE_GRAFT_CANDIDATE_PROMPT.format(
         N=n,
@@ -2724,14 +2298,11 @@ def run_line_graft_experiment(
         b.text for b in resp1.content if getattr(b, "text", None)
     )
     result["raw_candidates"] = raw_candidates
-
     candidates = parse_graft_candidates(raw_candidates)
     result["grafts_attempted"] = list(candidates)
-
     if not candidates:
         result["raw"] = raw_candidates
         return result
-
     # --- Stage 2: commit decisions ---
     candidates_block = _format_candidates_for_commit(candidates)
     commit_prompt = LINE_GRAFT_COMMIT_PROMPT.format(
@@ -2753,9 +2324,7 @@ def run_line_graft_experiment(
         + "\n\n=== STAGE 2: COMMIT DECISIONS ===\n\n"
         + raw_commits
     )
-
     commits, _final_ids = parse_graft_commits(raw_commits)
-
     # Track candidates rejected at commit stage (identified but not committed).
     committed_n_set = {c["n"] for c in commits}
     for cand in candidates:
@@ -2768,10 +2337,8 @@ def run_line_graft_experiment(
                 "graft_type": cand["graft_type"],
                 "unit": cand["unit"],
             })
-
     if not commits:
         return result
-
     # Filter dirty donors — enforces the clean-donor rule deterministically
     # in case Stage 2 misjudges its own candidate.
     clean_commits = []
@@ -2780,10 +2347,8 @@ def run_line_graft_experiment(
             clean_commits.append(c)
         else:
             result["grafts_rejected_dirty_donor"].append(c)
-
     if not clean_commits:
         return result
-
     # Apply grafts via deterministic string replacement.
     winner_text = drafts_ranked[0]["text"]
     grafted_text = winner_text
@@ -2794,47 +2359,32 @@ def run_line_graft_experiment(
             applied.append(c)
         else:
             result["grafts_rejected_no_match"].append(c)
-
     if not applied:
         return result
-
     result["grafted"] = True
     result["grafts"] = applied
     result["grafted_text"] = grafted_text
-
     # Diagnostic scan of the grafted output — reported but not gated.
     result["grafted_scan"] = scan_draft(grafted_text)
-
     grafted_path = FINAL_DIR / f"TOP1_GRAFTED_{batch_stub}.txt"
     save_text(grafted_path, grafted_text)
     result["grafted_path"] = str(grafted_path)
-
     return result
-
-
 # ============================================================================
 # File naming
 # ============================================================================
-
 def make_file_stub(prompt_id: int, temperature: float, model: str) -> str:
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     model_short = model.split("-")[-1][:6] if "-" in model else model[:6]
     return f"P{prompt_id} T{temperature} {model_short} {ts}"
-
-
 def make_winner_filename(prompt_id: int, temperature: float, model: str) -> str:
     stub = make_file_stub(prompt_id, temperature, model)
     return f"WINNER {stub}.txt"
-
-
 def make_batch_stub(batch_timestamp: str) -> str:
     return f"batch_{batch_timestamp}"
-
-
 # ============================================================================
 # Pipeline — Q1 quality floor, Q2 scanner-ranked TOP 1, Q3 graft
 # ============================================================================
-
 def _extract_target_word_count(outline_text: str) -> Optional[int]:
     """Scan the outline for a word-count target like '3800-4200' or
     '~4000 words'. Returns the midpoint of a range, or the single value,
@@ -2859,8 +2409,6 @@ def _extract_target_word_count(outline_text: str) -> Optional[int]:
     if single_m:
         return int(single_m.group(1).replace(",", ""))
     return None
-
-
 def _scanner_violation_score(scan: dict) -> int:
     """Sum the hard-cap violations for a draft. Lower is better for Q2
     ranking. Em-dashes above 12 count as (count - 12) to match the scanner's
@@ -2876,8 +2424,6 @@ def _scanner_violation_score(scan: dict) -> int:
         + scan.get("scan_emotion_naming_count", 0)
         + em_over_cap
     )
-
-
 def run_pipeline(
     client,
     eval_model: str,
@@ -2907,6 +2453,7 @@ def run_pipeline(
         "final_path": "",
         "final_source": "",
         "top_paths": [],
+        "ranking_manifest_path": "",
         "eval_raw": "",
         "line_graft": {},
         "final_pass": {},
@@ -2914,7 +2461,6 @@ def run_pipeline(
         "stage_f": {},
         "stage_f_batch": {},
     }
-
     lit = evaluate_drafts_with_anthropic(
         client, eval_model, drafts,
         outline_text=outline_text,
@@ -2924,11 +2470,9 @@ def run_pipeline(
     result["quality_by_run_id"] = lit.get("quality_by_run_id", {})
     result["quality_score_by_run_id"] = lit.get("quality_score_by_run_id", {})
     result["top_quality_score"] = int(lit.get("top_quality_score", 0) or 0)
-
     lit_ranking_ids = [drafts[i - 1]["run_id"] for i in lit["ranking"]]
     result["literary_ranking"] = lit_ranking_ids
     result["literary_winner_run_id"] = lit["winner_run_id"]
-
     acceptable_ids = []
     dropped_ids = []
     for d in drafts:
@@ -2939,7 +2483,6 @@ def run_pipeline(
             acceptable_ids.append(d["run_id"])
     result["acceptable_run_ids"] = acceptable_ids
     result["dropped_run_ids"] = dropped_ids
-
     if not acceptable_ids:
         result["halt"] = True
         result["halt_reason"] = (
@@ -2947,7 +2490,6 @@ def run_pipeline(
             "Regenerate this batch — the pipeline will not ship an unacceptable draft."
         )
         return result
-
     quality_scores = result["quality_score_by_run_id"]
     top_quality_score = max((int(quality_scores.get(rid, 0) or 0) for rid in acceptable_ids), default=0)
     retained_ids = [rid for rid in acceptable_ids if int(quality_scores.get(rid, 0) or 0) == top_quality_score]
@@ -2957,7 +2499,6 @@ def run_pipeline(
     result["top_quality_score"] = int(top_quality_score)
     result["retained_run_ids"] = retained_ids
     result["discarded_below_top_quality_ids"] = discarded_below_top_quality_ids
-
     predictor = stage_f_load_predictor(str(LABELED_CORPUS_PATH), STAGE_F_RIDGE_LAMBDA)
     retained_drafts = [d for d in drafts if d["run_id"] in retained_ids]
     ai_scores = []
@@ -2987,29 +2528,41 @@ def run_pipeline(
         if not pipeline_ranking:
             pipeline_ranking = retained_ids[:]
         result["ai_scores_by_run_id"] = {}
-
     if not pipeline_ranking:
         pipeline_ranking = retained_ids[:]
-
     result["pipeline_ranking"] = pipeline_ranking
     result["top1_run_id"] = pipeline_ranking[0]
-
     top_paths = []
+    ranking_lines = ["AI RANKING — BEST TO WORST", "=" * 60]
     for rank_pos, run_id in enumerate(pipeline_ranking[:top_n], 1):
         draft_obj = next((d for d in drafts if d["run_id"] == run_id), None)
         if draft_obj is None:
             continue
-        top_filename = f"TOP{rank_pos}_{batch_stub}_{run_id}.txt"
+        top_filename = f"AI_RANK_{rank_pos:02d}_{batch_stub}_{run_id}.txt"
         top_path = FINAL_DIR / top_filename
         save_text(top_path, draft_obj["text"])
         top_paths.append(top_path)
+        pred_obj = result.get("ai_scores_by_run_id", {}).get(run_id, {}) or {}
+        pred_score = pred_obj.get("predicted_score")
+        raw_score = pred_obj.get("raw_score")
+        band = pred_obj.get("band", "")
+        bits = [f"#{rank_pos}", run_id]
+        if pred_score is not None:
+            bits.append(f"pred={pred_score}")
+        if raw_score is not None:
+            bits.append(f"raw={raw_score}")
+        if band:
+            bits.append(f"band={band}")
+        bits.append(top_filename)
+        ranking_lines.append(" | ".join(str(b) for b in bits))
     result["top_paths"] = top_paths
-
+    ranking_manifest_path = FINAL_DIR / f"AI_RANKING_{batch_stub}.txt"
+    save_text(ranking_manifest_path, "\n".join(ranking_lines))
+    result["ranking_manifest_path"] = str(ranking_manifest_path)
     top1_text = next(
         (d["text"] for d in drafts if d["run_id"] == result["top1_run_id"]),
         "",
     )
-
     if len(pipeline_ranking) >= 2:
         drafts_ranked = []
         for run_id in pipeline_ranking[:top_n]:
@@ -3021,7 +2574,6 @@ def run_pipeline(
                 client, eval_model, drafts_ranked, scan_by_run_id, batch_stub,
             )
             result["line_graft"] = line_graft
-
     lg = result.get("line_graft") or {}
     if lg.get("grafted") and lg.get("grafted_text"):
         result["final_source"] = "top1_grafted"
@@ -3035,7 +2587,6 @@ def run_pipeline(
         final_path = FINAL_DIR / f"FINAL_{batch_stub}_top1_ungrafted.txt"
         save_text(final_path, top1_text)
         result["final_path"] = str(final_path)
-
     acceptable_drafts_in_rank_order = []
     for run_id in pipeline_ranking:
         draft_obj = next((d for d in drafts if d["run_id"] == run_id), None)
@@ -3047,7 +2598,6 @@ def run_pipeline(
             outline_text, batch_stub,
         )
         result["final_pass"] = final_pass
-
     try:
         top1_id = result.get("top1_run_id", "")
         le = run_line_edit_pass(
@@ -3074,7 +2624,6 @@ def run_pipeline(
             "report_path": "",
             "changed": False,
         }
-
     try:
         predictor = stage_f_load_predictor(str(LABELED_CORPUS_PATH), STAGE_F_RIDGE_LAMBDA)
         batch_scores = []
@@ -3091,13 +2640,11 @@ def run_pipeline(
             ),
             reverse=True,
         )
-
         text_for_prediction = result.get(
             "final_text_lineedited",
             result.get("final_text", ""),
         )
         result["stage_f"] = stage_f_predict(text_for_prediction, predictor)
-
         final_label = "FINAL_LINEEDITED" if result.get("final_text_lineedited") else "FINAL"
         batch_debug_items = list(batch_scores) + [{
             "run_id": "",
@@ -3132,10 +2679,7 @@ def run_pipeline(
             "report_path": "",
             "scores": [],
         }
-
     return result
-
-
 def write_batch_summary(
     pipeline_result: dict,
     drafts: list,
@@ -3151,14 +2695,12 @@ def write_batch_summary(
     lines.append(f"Drafts in batch: {len(drafts)}")
     lines.append(f"Temperatures: {temperatures}")
     lines.append(f"Prompts used: P{', P'.join(str(p) for p in prompts_used)}")
-
     if pipeline_result.get("halt"):
         lines.append("")
         lines.append("=" * 60)
         lines.append("PIPELINE HALTED")
         lines.append("=" * 60)
         lines.append(pipeline_result.get("halt_reason", "Unknown halt."))
-
     lines.append("")
     lines.append("=" * 60)
     lines.append("Q1 — QUALITY FLOOR / TOP WRITING SCORE")
@@ -3177,7 +2719,6 @@ def write_batch_summary(
         lines.append(f"  {d['run_id']}: {verdict}")
         if reason:
             lines.append(f"    {reason}")
-
     lines.append("")
     lines.append("=" * 60)
     lines.append("MECHANICAL SCAN RESULTS")
@@ -3198,12 +2739,10 @@ def write_batch_summary(
             f"({scan.get('scan_em_dash_per_1k', 0)}/1k), "
             f"emotion={scan.get('scan_emotion_naming_count', 0)}"
         )
-
     if pipeline_result.get("halt"):
         summary_path = FINAL_DIR / f"SUMMARY_{batch_stub}.txt"
         save_text(summary_path, "\n".join(lines))
         return summary_path
-
     lines.append("")
     lines.append("=" * 60)
     lines.append("Q2 — AI RANKING OF RETAINED TOP-WRITING DRAFTS")
@@ -3230,7 +2769,6 @@ def write_batch_summary(
         elif run_id == lit_winner and run_id == top1_id:
             marker += " [literary winner]"
         lines.append(f"  {rank_pos}. {run_id} (violations={violations}){marker}")
-
     if scanner_veto:
         lines.append("")
         lines.append(
@@ -3242,7 +2780,6 @@ def write_batch_summary(
     elif lit_winner and lit_winner == top1_id:
         lines.append("")
         lines.append("Literary winner shipped as TOP 1 (no scanner veto).")
-
     lines.append("")
     lines.append("=" * 60)
     lines.append("Q3 — SENTENCE-GRAFT PASS")
@@ -3281,7 +2818,6 @@ def write_batch_summary(
             lines.append("  Rejected (donor carried hard-cap pattern):")
             for g in lg["grafts_rejected_dirty_donor"]:
                 lines.append(f"    Draft {g['source_draft']}: {g['with_text'][:100]}{'...' if len(g['with_text']) > 100 else ''}")
-
         if lg.get("grafted_scan"):
             gs = lg["grafted_scan"]
             lines.append("")
@@ -3309,7 +2845,6 @@ def write_batch_summary(
             lines.append(f"  {rejected_no_match} rejected — REPLACE text did not match TOP 1 verbatim.")
     else:
         lines.append("No runner-up sentence or clause met the graft conditions.")
-
     lines.append("")
     lines.append("=" * 60)
     lines.append("FINAL DELIVERABLE")
@@ -3321,7 +2856,6 @@ def write_batch_summary(
         lines.append("TOP 1 unchanged — no grafts qualified.")
     else:
         lines.append("(source unknown)")
-
     lines.append("")
     lines.append("=" * 60)
     lines.append("FINAL PASS — COMMERCIAL vs LITERARY PICKS")
@@ -3344,7 +2878,6 @@ def write_batch_summary(
             lines.append("Most commercial: (not parsed from response)")
         if lit_idx and com_idx and lit_idx == com_idx:
             lines.append("(Same draft chosen for both registers.)")
-
     lines.append("")
     lines.append("=" * 60)
     lines.append("STAGE G — LINE-EDIT PASS (mechanical copyedit + AI-tell handling)")
@@ -3389,7 +2922,6 @@ def write_batch_summary(
                 lines.append(
                     f"  [{fs['flagged_word']}] {fs['original_sentence'].strip()}"
                 )
-
     lines.append("")
     lines.append("=" * 60)
     lines.append("STAGE F — PREDICTED ORIGINALITY HUMAN-SCORE (advisory)")
@@ -3418,7 +2950,6 @@ def write_batch_summary(
             lines.append("Scored on: LINE-EDITED text (Stage G output).")
         else:
             lines.append("Scored on: original FINAL text (Stage G produced no change).")
-
         scores = sfb.get("scores") or []
         if scores:
             lines.append("")
@@ -3435,7 +2966,6 @@ def write_batch_summary(
                 )
         if sfb.get("report_path"):
             lines.append(f"Debug report: {sfb['report_path']}")
-
     lines.append("")
     lines.append("=" * 60)
     lines.append("FILES")
@@ -3452,6 +2982,8 @@ def write_batch_summary(
         lines.append(f"Final pass — commercial: {fp['commercial_path']}")
     if fp.get("reasoning_path"):
         lines.append(f"Final pass — reasoning:  {fp['reasoning_path']}")
+    if pipeline_result.get("ranking_manifest_path"):
+        lines.append(f"AI ranking order:   {pipeline_result['ranking_manifest_path']}")
     if le.get("edited_path"):
         lines.append(f"Line-edited final:  {le['edited_path']}")
     if le.get("report_path"):
@@ -3459,16 +2991,12 @@ def write_batch_summary(
     sfb = pipeline_result.get("stage_f_batch") or {}
     if sfb.get("report_path"):
         lines.append(f"Stage F debug:      {sfb['report_path']}")
-
     summary_path = FINAL_DIR / f"SUMMARY_{batch_stub}.txt"
     save_text(summary_path, "\n".join(lines))
     return summary_path
-
-
 # ============================================================================
 # Export
 # ============================================================================
-
 def export_zip(df: pd.DataFrame, file_paths: list) -> bytes:
     import zipfile
     buf = io.BytesIO()
@@ -3480,8 +3008,6 @@ def export_zip(df: pd.DataFrame, file_paths: list) -> bytes:
             if p.exists():
                 zf.write(p, p.name)
     return buf.getvalue()
-
-
 def gather_output_paths(df: pd.DataFrame) -> list:
     paths = []
     for col in ["output_file", "payload_file", "meta_file"]:
@@ -3496,23 +3022,17 @@ def gather_output_paths(df: pd.DataFrame) -> list:
             if p.is_file():
                 paths.append(p)
     return paths
-
-
 # ============================================================================
 # GitHub sync
 # ============================================================================
-
 GITHUB_API_BASE = "https://api.github.com"
 GITHUB_SYNC_STATUS_KEY = "github_sync_status"
 GITHUB_PULLED_KEY = "github_pulled_this_session"
-
-
 def load_github_config() -> dict:
     token = ""
     repo = ""
     branch = ""
     source = ""
-
     try:
         if "GITHUB_TOKEN" in st.secrets:
             token = str(st.secrets.get("GITHUB_TOKEN", "")).strip()
@@ -3523,7 +3043,6 @@ def load_github_config() -> dict:
     except Exception:
         token = ""
         repo = ""
-
     if not (token and repo):
         env_token = os.environ.get("GITHUB_TOKEN", "").strip()
         env_repo = os.environ.get("GITHUB_REPO", "").strip()
@@ -3533,7 +3052,6 @@ def load_github_config() -> dict:
             repo = env_repo
             branch = env_branch
             source = "environment variable"
-
     configured = bool(token and repo)
     return {
         "token": token,
@@ -3542,36 +3060,26 @@ def load_github_config() -> dict:
         "configured": configured,
         "source": source,
     }
-
-
 def _gh_headers(token: str) -> dict:
     return {
         "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-
-
 def _gh_record_status(message: str, kind: str = "info") -> None:
     st.session_state[GITHUB_SYNC_STATUS_KEY] = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "message": message,
         "kind": kind,
     }
-
-
 def _local_path_for_repo_path(repo_path: str) -> Path:
     return RUNS_DIR / repo_path
-
-
 def _repo_path_for_local(local_path: Path) -> Optional[str]:
     try:
         rel = local_path.resolve().relative_to(RUNS_DIR.resolve())
     except Exception:
         return None
     return rel.as_posix()
-
-
 def github_list_tree(cfg: dict) -> List[dict]:
     if not cfg.get("configured"):
         return []
@@ -3614,8 +3122,6 @@ def github_list_tree(cfg: dict) -> List[dict]:
         for entry in entries
         if entry.get("type") == "blob" and entry.get("path")
     ]
-
-
 def github_get_file_bytes(cfg: dict, path: str) -> Optional[bytes]:
     if not cfg.get("configured"):
         return None
@@ -3645,8 +3151,6 @@ def github_get_file_bytes(cfg: dict, path: str) -> Optional[bytes]:
         except requests.RequestException:
             return None
     return None
-
-
 def github_get_file_sha(cfg: dict, path: str) -> Optional[str]:
     if not cfg.get("configured"):
         return None
@@ -3662,8 +3166,6 @@ def github_get_file_sha(cfg: dict, path: str) -> Optional[str]:
     if not resp.ok:
         return None
     return resp.json().get("sha")
-
-
 def github_put_file(cfg: dict, path: str, data: bytes, message: str) -> bool:
     if not cfg.get("configured"):
         return False
@@ -3692,8 +3194,6 @@ def github_put_file(cfg: dict, path: str, data: bytes, message: str) -> bool:
         )
         return False
     return True
-
-
 def github_pull_all(cfg: dict) -> dict:
     result = {"pulled": 0, "skipped": 0, "failed": 0}
     if not cfg.get("configured"):
@@ -3720,8 +3220,6 @@ def github_pull_all(cfg: dict) -> dict:
         kind="success" if result["failed"] == 0 else "warn",
     )
     return result
-
-
 def github_push_paths(cfg: dict, local_paths: List[Path], commit_prefix: str) -> dict:
     result = {"pushed": 0, "failed": 0}
     if not cfg.get("configured"):
@@ -3749,8 +3247,6 @@ def github_push_paths(cfg: dict, local_paths: List[Path], commit_prefix: str) ->
             kind="success",
         )
     return result
-
-
 def github_push_after_generation(
     cfg: dict, csv_path: Path, output_path: Path, payload_path: Path, meta_path: Path,
 ) -> None:
@@ -3760,16 +3256,12 @@ def github_push_after_generation(
         cfg, [csv_path, output_path, payload_path, meta_path],
         commit_prefix="generation",
     )
-
-
 def github_push_after_pipeline(
     cfg: dict, csv_path: Path, pipeline_files: List[Path],
 ) -> None:
     if not cfg.get("configured"):
         return
     github_push_paths(cfg, [csv_path] + pipeline_files, commit_prefix="pipeline")
-
-
 def github_pull_on_startup_if_needed(cfg: dict, csv_path: Path) -> None:
     if not cfg.get("configured"):
         return
@@ -3779,28 +3271,20 @@ def github_pull_on_startup_if_needed(cfg: dict, csv_path: Path) -> None:
     if local_empty:
         github_pull_all(cfg)
     st.session_state[GITHUB_PULLED_KEY] = True
-
-
 # ============================================================================
 # Streamlit UI
 # ============================================================================
-
 st.set_page_config(page_title="Micro-Prompt Harness", layout="wide")
 st.title("Micro-Prompt Harness")
 st.caption("Generate · Quality Gate · AI Rank · Ship")
-
 ensure_dirs()
 csv_path = RUNS_DIR / CSV_FILENAME
-
 github_cfg = load_github_config()
 github_pull_on_startup_if_needed(github_cfg, csv_path)
-
 auto_key, auto_key_source = load_api_key()
-
 # --- Sidebar ---
 with st.sidebar:
     st.header("Configuration")
-
     if auto_key:
         api_key = auto_key
         st.success(f"API key loaded from {auto_key_source}")
@@ -3809,49 +3293,36 @@ with st.sidebar:
         api_key = clean_api_key(manual_key) if manual_key else ""
         if not api_key:
             st.warning("Set ANTHROPIC_API_KEY in Streamlit secrets or enter above.")
-
     st.markdown("---")
-
     gen_model = st.text_input("Generation model", value=DEFAULT_GEN_MODEL)
     eval_model = st.text_input("Evaluation model", value=DEFAULT_EVAL_MODEL)
-
     st.markdown("---")
-
     temps_input = st.text_input("Temperatures (comma-separated)", value="1.0")
     try:
         temperatures = [float(t.strip()) for t in temps_input.split(",") if t.strip()]
     except ValueError:
         temperatures = [0.7]
         st.warning("Could not parse temperatures. Using 0.7.")
-
     repetitions = st.number_input("Repetitions per prompt×temp", min_value=1, max_value=10, value=3)
-
     top_n = st.number_input(
         "Top-N drafts to export for external testing",
         min_value=1, max_value=10, value=3,
         help="After the pipeline runs, the top-N drafts from the literary ranking are saved as separate files so you can run them through external detectors. The sentence-graft pass also draws its donor pool from this top-N.",
     )
-
     st.markdown("---")
-
     st.subheader("Documents")
     st.caption("Upload the files the prompt references.")
-
     doc_uploads = {}
     outline_file = st.file_uploader("Outline", type=["txt", "docx"], key="outline")
     if outline_file:
         doc_uploads["Outline"] = extract_text_from_upload(outline_file)
-
     source_file = st.file_uploader("Source text (voice model)", type=["txt", "docx"], key="source")
     if source_file:
         doc_uploads["Source Text"] = extract_text_from_upload(source_file)
-
     profiles_file = st.file_uploader("Character profiles", type=["txt", "docx"], key="profiles")
     if profiles_file:
         doc_uploads["Character Profiles"] = extract_text_from_upload(profiles_file)
-
     st.markdown("---")
-
     st.subheader("GitHub sync")
     if github_cfg["configured"]:
         st.success(f"Repo: `{github_cfg['repo']}` ({github_cfg['source']})")
@@ -3863,27 +3334,21 @@ with st.sidebar:
             st.rerun()
     else:
         st.info("Set GITHUB_TOKEN and GITHUB_REPO in secrets to enable sync.")
-
     st.markdown("---")
     st.caption(f"Gen: `{gen_model}` · Eval: `{eval_model}`")
     st.caption(f"Temps: {temperatures} · Reps: {repetitions} · Top-N: {top_n}")
     if doc_uploads:
         st.caption(f"Docs: {', '.join(doc_uploads.keys())}")
-
 prompts_df = load_prompts()
-
 if prompts_df.empty:
     st.warning(
         f"No `{PROMPTS_CSV}` found or it has no rows. "
         f"Create a CSV with columns `id` and `text` (and optionally `category`)."
     )
     st.stop()
-
 left_col, right_col = st.columns([1, 1])
-
 with left_col:
     st.subheader("Prompt")
-
     # Pre-select prompt 62 only
     target_pid = 62
     target_row = prompts_df[prompts_df["id"].astype(int) == target_pid]
@@ -3891,16 +3356,13 @@ with left_col:
         st.error(f"Prompt {target_pid} not found in {PROMPTS_CSV}.")
         st.stop()
     selected_ids = [target_pid]
-
     with st.expander(f"P{target_pid} — {str(target_row.iloc[0].get('category', ''))}"):
         st.text(str(target_row.iloc[0]["text"]))
-
     total_runs = len(temperatures) * repetitions
     st.write(
         f"Prompt **P{target_pid}** × **{len(temperatures)}** temps × "
         f"**{repetitions}** reps = **{total_runs}** drafts"
     )
-
     if st.button("Generate & Evaluate", type="primary", disabled=not api_key or total_runs == 0):
         problems = []
         if not api_key:
@@ -3914,12 +3376,10 @@ with left_col:
                 problems.append("Outline not uploaded. The prompt references it.")
             if "Source Text" not in doc_uploads:
                 problems.append("Source text not uploaded. The prompt references it.")
-
         prompt_row = prompts_df[prompts_df["id"].astype(int) == target_pid].iloc[0]
         txt = str(prompt_row["text"]).strip()
         if not txt or txt == "nan":
             problems.append(f"P{target_pid} has no prompt text (empty or NaN in prompts.csv).")
-
         if problems:
             st.error("**Cannot generate — fix these first:**")
             for p in problems:
@@ -3929,7 +3389,6 @@ with left_col:
             progress = st.progress(0.0)
             status = st.empty()
             prompt_text = str(prompt_row["text"])
-
             gated = generate_quality_gated_batch(
                 client=client,
                 gen_model=gen_model,
@@ -3945,13 +3404,11 @@ with left_col:
                 status=status,
                 max_tries=QUALITY_GATE_MAX_TRIES,
             )
-
             progress.empty()
             batch_drafts = gated.get("final_drafts", [])
             batch_scans = gated.get("scan_by_run_id", {})
             batch_run_ids_all = gated.get("all_run_ids", [])
             batch_run_ids_ordered = [d["run_id"] for d in batch_drafts]
-
             if gated.get("halt_reason"):
                 status.warning(gated["halt_reason"])
             else:
@@ -3959,20 +3416,17 @@ with left_col:
                     f"Quality gate complete. Retained {len(batch_drafts)}/{total_runs} top-writing drafts. "
                     f"Running AI ranking pipeline..."
                 )
-
             if len(batch_drafts) >= 1:
                 outline_text = doc_uploads.get("Outline", "")
                 temps_used = sorted(set(temperatures))
                 batch_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 batch_stub = make_batch_stub(batch_timestamp)
-
                 st.session_state["last_batch_stub"] = batch_stub
                 st.session_state["last_batch_run_ids"] = batch_run_ids_ordered
                 st.session_state["last_batch_size"] = len(batch_drafts)
                 st.session_state.pop("last_pipeline_result", None)
                 st.session_state.pop("last_pipeline_summary_path", None)
                 st.session_state.pop("last_pipeline_error", None)
-
                 try:
                     result = run_pipeline(
                         client=client,
@@ -3989,7 +3443,6 @@ with left_col:
                     result["quality_gate_retained_runs"] = len(batch_drafts)
                     if gated.get("halt_reason"):
                         result["quality_gate_halt_reason"] = gated.get("halt_reason", "")
-
                     summary_path = write_batch_summary(
                         pipeline_result=result,
                         drafts=batch_drafts,
@@ -3998,7 +3451,6 @@ with left_col:
                         temperatures=temps_used,
                         prompts_used=[target_pid],
                     )
-
                     evaluation_id = f"eval_{batch_timestamp}"
                     update_records_bulk(csv_path, batch_run_ids_all, {
                         "is_winner": False,
@@ -4006,7 +3458,6 @@ with left_col:
                         "evaluator_model": eval_model,
                         "pipeline_role": "",
                     })
-
                     quality_by_run = result.get("quality_by_run_id", {})
                     quality_score_by_run = result.get("quality_score_by_run_id", {})
                     for run_id, q in quality_by_run.items():
@@ -4016,7 +3467,6 @@ with left_col:
                             "quality_score": int(quality_score_by_run.get(run_id, 0) or 0),
                             "evaluation_raw": result.get("eval_raw", "")[:8000],
                         })
-
                     for run_id in result.get("dropped_run_ids", []):
                         update_record(csv_path, run_id, {
                             "pipeline_role": "dropped_unacceptable",
@@ -4027,14 +3477,12 @@ with left_col:
                         })
                     for rank_pos, run_id in enumerate(result.get("pipeline_ranking", []), 1):
                         update_record(csv_path, run_id, {"evaluation_rank": rank_pos})
-
                     top1_id = result.get("top1_run_id", "")
                     if top1_id:
                         update_record(csv_path, top1_id, {
                             "is_winner": True,
                             "pipeline_role": "top1_winner",
                         })
-
                     lg = result.get("line_graft") or {}
                     if lg.get("grafted"):
                         donor_positions = {g["source_draft"] for g in lg.get("grafts", [])}
@@ -4046,15 +3494,15 @@ with left_col:
                                     update_record(csv_path, donor_run_id, {
                                         "pipeline_role": "graft_donor",
                                     })
-
                     st.session_state["last_pipeline_result"] = result
                     st.session_state["last_pipeline_summary_path"] = str(summary_path)
                     st.session_state["last_batch_stub"] = batch_stub
                     st.session_state["last_batch_run_ids"] = batch_run_ids_ordered
                     st.session_state["last_batch_size"] = len(batch_drafts)
-
                     if github_cfg["configured"]:
                         files_to_push = list(result.get("top_paths", [])) + [summary_path]
+                        if result.get("ranking_manifest_path"):
+                            files_to_push.append(Path(result["ranking_manifest_path"]))
                         if result.get("final_path"):
                             files_to_push.insert(0, Path(result["final_path"]))
                         lg = result.get("line_graft", {})
@@ -4078,7 +3526,6 @@ with left_col:
                             )
                         except Exception as push_exc:
                             st.warning(f"GitHub push failed: {push_exc}")
-
                 except Exception as e:
                     import traceback
                     st.session_state["last_pipeline_error"] = {
@@ -4088,13 +3535,9 @@ with left_col:
                     }
             else:
                 st.warning("Quality gate produced no retained drafts. Nothing to rank.")
-
             st.rerun()
-
-
 with right_col:
     st.subheader("Run log")
-
     df = load_csv(csv_path)
     if df.empty:
         st.info("No runs yet. Generate some drafts.")
@@ -4106,14 +3549,12 @@ with right_col:
             "is_winner", "pipeline_role", "evaluation_rank",
         ]
         available = [c for c in display_cols if c in df.columns]
-        st.dataframe(df[available], use_container_width=True)
-
+        st.dataframe(df[available], width='stretch')
         # --- Show pipeline results if available ---
         result = st.session_state.get("last_pipeline_result")
         if result:
             st.markdown("---")
             st.subheader("Pipeline result")
-
             # --- Q1 halt case ---
             if result.get("halt"):
                 st.error(
@@ -4134,7 +3575,6 @@ with right_col:
                 lit_winner = result.get("literary_winner_run_id", "")
                 final_source = result.get("final_source", "")
                 lg = result.get("line_graft") or {}
-
                 # --- Headline status ---
                 if final_source == "top1_grafted":
                     st.success(
@@ -4166,7 +3606,6 @@ with right_col:
                         )
                 else:
                     st.info(f"Pipeline complete. TOP 1: `{top1_id}`.")
-
                 # --- Q1 quality floor summary ---
                 dropped = result.get("dropped_run_ids", [])
                 acceptable = result.get("acceptable_run_ids", [])
@@ -4181,7 +3620,6 @@ with right_col:
                             q = quality.get(run_id, {})
                             st.markdown(f"**{run_id}**")
                             st.caption(q.get("reason", "(no reason)"))
-
                 # --- Q2 literary-ranked TOP 1 with scanner veto ---
                 scanner_veto = result.get("scanner_veto", {})
                 if scanner_veto:
@@ -4193,10 +3631,28 @@ with right_col:
                     )
                 elif lit_winner and lit_winner == top1_id:
                     st.caption(f"Literary winner `{top1_id}` shipped as TOP 1 (no scanner veto).")
-
+                st.markdown("**AI ranking — best to worst**")
+                rank_rows = []
+                ai_scores_by_run = result.get("ai_scores_by_run_id", {}) or {}
+                for rank_pos, run_id in enumerate(result.get("pipeline_ranking", []), 1):
+                    pred_obj = ai_scores_by_run.get(run_id, {}) or {}
+                    pred_score = pred_obj.get("predicted_score")
+                    raw_score = pred_obj.get("raw_score")
+                    band = pred_obj.get("band", "")
+                    rank_rows.append({
+                        "rank": rank_pos,
+                        "run_id": run_id,
+                        "predicted_score": pred_score,
+                        "raw_score": raw_score,
+                        "band": band,
+                    })
+                if rank_rows:
+                    st.dataframe(pd.DataFrame(rank_rows), width='stretch', hide_index=True)
+                    ranking_manifest_path = result.get("ranking_manifest_path", "")
+                    if ranking_manifest_path:
+                        st.caption(f"AI ranking file: `{ranking_manifest_path}`")
                 with st.expander("Literary evaluator reasoning"):
                     st.text(result["eval_raw"])
-
                 # --- Q3 sentence-graft pass details ---
                 if lg:
                     if lg.get("grafted"):
@@ -4208,30 +3664,25 @@ with right_col:
                                 st.text(f"  Replaced: {g['replace']}")
                                 st.text(f"  With:     {g['with_text']}")
                                 st.caption(f"  Reason: {g['reason']}")
-
                             rejected_dirty = lg.get("grafts_rejected_dirty_donor", [])
                             if rejected_dirty:
                                 st.markdown("**Rejected — donor carried hard-cap pattern:**")
                                 for g in rejected_dirty:
                                     st.text(f"  Draft {g['source_draft']}: {g['with_text']}")
-
                         rejected_no_match = lg.get("grafts_rejected_no_match", [])
                         if rejected_no_match:
                             st.markdown("**Rejected — REPLACE text not found in TOP 1:**")
                             for g in rejected_no_match:
                                 st.text(f"  Draft {g['source_draft']}: {g['replace']}")
-
                         gs = lg.get("grafted_scan")
                         if gs:
                             st.caption(
                                 f"Diagnostic scan of TOP1_GRAFTED (informational, not a gate): "
                                 f"{format_scan_summary(gs)}"
                             )
-
                 if lg.get("raw"):
                     with st.expander("Sentence-graft evaluator reasoning"):
                         st.text(lg["raw"])
-
                 # --- Stage E: Final pass — commercial vs literary picks ---
                 fp = result.get("final_pass") or {}
                 if fp.get("ran"):
@@ -4261,7 +3712,6 @@ with right_col:
                     if fp.get("raw"):
                         with st.expander("Final-pass evaluator reasoning"):
                             st.text(fp["raw"])
-
                 # --- Stage G: Line-edit pass (copyedit + AI-tell handling) ---
                 le = result.get("line_edit") or {}
                 if le.get("ran"):
@@ -4316,7 +3766,6 @@ with right_col:
                         st.caption(f"Line-edited text: `{le['edited_path']}`")
                     if le.get("report_path"):
                         st.caption(f"Audit report:     `{le['report_path']}`")
-
                 # --- Originality re-rank: override TOP 1 with color-based ranker ---
                 st.markdown("---")
                 st.subheader("Re-rank with Originality reports")
@@ -4327,14 +3776,12 @@ with right_col:
                     "strong-orange cluster shape. Matches reports to drafts automatically "
                     "by text overlap — filenames are ignored."
                 )
-
                 orig_uploads = st.file_uploader(
                     "Originality .docx exports (multi-select)",
                     type=["docx"],
                     accept_multiple_files=True,
                     key=f"orig_uploads_{st.session_state.get('last_batch_stub', 'nobatch')}",
                 )
-
                 if orig_uploads and st.button(
                     "Compute Originality ranking",
                     key=f"orig_rerank_btn_{st.session_state.get('last_batch_stub', 'nobatch')}",
@@ -4358,7 +3805,6 @@ with right_col:
                             "run_id": str(run_id),
                             "text": draft_text,
                         })
-
                     if not candidate_drafts:
                         st.error("Could not load any batch drafts from disk for matching.")
                     else:
@@ -4388,7 +3834,6 @@ with right_col:
                                 "metrics": metrics,
                                 "filename": uf.name,
                             }
-
                         if not reports:
                             st.error(
                                 "No uploaded reports could be matched to drafts in this "
@@ -4432,12 +3877,10 @@ with right_col:
                                 )
                                 for i, row in enumerate(ranking, 1):
                                     row["rank"] = i
-
                                 # Store on session state so subsequent UI can read it
                                 st.session_state["originality_ranking"] = ranking
                                 st.session_state["originality_reports"] = reports
                                 st.session_state["originality_unmatched"] = unmatched
-
                 # --- Display Originality ranking if computed ---
                 orig_ranking = st.session_state.get("originality_ranking")
                 orig_reports = st.session_state.get("originality_reports", {})
@@ -4445,7 +3888,6 @@ with right_col:
                 if orig_ranking:
                     scanner_top1 = result.get("top1_run_id", "")
                     orig_top1 = orig_ranking[0]["run_id"]
-
                     if scanner_top1 and orig_top1 != scanner_top1:
                         st.warning(
                             f"Originality TOP 1 (`{orig_top1}`) differs from scanner "
@@ -4459,7 +3901,6 @@ with right_col:
                             f"Originality TOP 1 (`{orig_top1}`) matches scanner TOP 1. "
                             f"Ship the current FINAL."
                         )
-
                     rank_rows = []
                     for row in orig_ranking:
                         m = row["metrics"]
@@ -4481,21 +3922,18 @@ with right_col:
                         use_container_width=True,
                         hide_index=True,
                     )
-
                     if orig_unmatched:
                         with st.expander(
                             f"Unmatched uploads ({len(orig_unmatched)})"
                         ):
                             for name, reason in orig_unmatched:
                                 st.text(f"  {name}: {reason}")
-
                     st.caption(
                         "Ranking formula: -(longest_O²)·3 - in_clusters - total_O·0.3 "
                         "+ (mild_G - mild_O)·0.5. Strong-green count is deliberately "
                         "excluded — it is non-monotonic with true score and correlates "
                         "with concentrated orange clusters."
                     )
-
                     if st.button(
                         "Clear Originality ranking",
                         key=f"orig_clear_{st.session_state.get('last_batch_stub', 'nobatch')}",
@@ -4504,18 +3942,15 @@ with right_col:
                         st.session_state.pop("originality_reports", None)
                         st.session_state.pop("originality_unmatched", None)
                         st.rerun()
-
             summary_path_str = st.session_state.get("last_pipeline_summary_path")
             if summary_path_str:
                 summary_path = Path(summary_path_str)
                 if summary_path.exists():
                     with st.expander("Batch summary"):
                         st.text(summary_path.read_text(encoding="utf-8"))
-
             # --- Downloads scoped to this batch ---
             st.markdown("---")
             batch_stub = st.session_state.get("last_batch_stub", "batch")
-
             # Collect batch files: TOP-N drafts + FINAL + LINE-GRAFT + summary
             batch_paths = []
             for p in result.get("top_paths", []):
@@ -4547,7 +3982,11 @@ with right_col:
                 sp = Path(summary_path_str)
                 if sp.exists():
                     batch_paths.append(sp)
-
+            ranking_manifest_path = result.get("ranking_manifest_path", "")
+            if ranking_manifest_path:
+                rmp = Path(ranking_manifest_path)
+                if rmp.exists():
+                    batch_paths.append(rmp)
             if batch_paths:
                 # Build ZIP of just this batch
                 batch_run_ids = st.session_state.get("last_batch_run_ids", [])
@@ -4559,7 +3998,6 @@ with right_col:
                     file_name=f"{batch_stub}.zip",
                     mime="application/zip",
                 )
-
                 csv_buf = io.StringIO()
                 batch_df.to_csv(csv_buf, index=False)
                 st.download_button(
@@ -4574,7 +4012,6 @@ with right_col:
             # scope the fallback download to THIS batch only (never to
             # accumulated FINAL_DIR history).
             st.markdown("---")
-
             err = st.session_state.get("last_pipeline_error")
             if err:
                 st.error(
@@ -4582,17 +4019,14 @@ with right_col:
                 )
                 with st.expander("Traceback"):
                     st.code(err["traceback"])
-
             current_batch_stub = st.session_state.get("last_batch_stub")
             current_batch_ids = st.session_state.get("last_batch_run_ids", [])
-
             # FINAL_DIR files from THIS batch only, matched by stub in filename.
             batch_paths = []
             if current_batch_stub and FINAL_DIR.exists():
                 for p in sorted(FINAL_DIR.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
                     if p.is_file() and current_batch_stub in p.name:
                         batch_paths.append(p)
-
             # Output files from THIS batch only, matched by run_id — not
             # df.tail(N), which drifts when other runs arrive.
             if current_batch_ids:
@@ -4607,7 +4041,6 @@ with right_col:
                 op = Path(str(row.get("output_file", "")))
                 if op.exists():
                     output_paths.append(op)
-
             all_dl_paths = output_paths + batch_paths
             if all_dl_paths:
                 batch_label = current_batch_stub or datetime.now().strftime("%Y%m%d")
@@ -4618,7 +4051,6 @@ with right_col:
                     file_name=f"batch_{batch_label}.zip",
                     mime="application/zip",
                 )
-
                 csv_buf = io.StringIO()
                 recent_df.to_csv(csv_buf, index=False)
                 st.download_button(

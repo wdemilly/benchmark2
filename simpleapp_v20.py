@@ -1316,7 +1316,7 @@ def run_line_edit_pass(
     except Exception:
         pass
     if result["changed"]:
-        edited_path = FINAL_DIR / f"FINAL_{batch_stub}_LINEEDITED.txt"
+        edited_path = FINAL_DIR / f"FINAL_LINEEDITED_{batch_stub}_{top1_run_id}.txt"
         save_text(edited_path, current_text)
         result["edited_path"] = str(edited_path)
     # Always write the report, even when no edits were applied — it
@@ -1357,7 +1357,7 @@ def run_line_edit_pass(
         if entry.get("graft_reason"):
             report_lines.append(f"    Graft notes: {entry['graft_reason']}")
         report_lines.append("")
-    report_path = FINAL_DIR / f"LINEEDIT_REPORT_{batch_stub}.txt"
+    report_path = FINAL_DIR / f"LINEEDIT_REPORT_{batch_stub}_{top1_run_id}.txt"
     save_text(report_path, "\n".join(report_lines))
     result["report_path"] = str(report_path)
     return result
@@ -1721,7 +1721,7 @@ def generate_quality_gated_batch(
             )
             stub = make_file_stub(prompt_id, slot["temp"], gen_model)
             run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:20]
-            payload_path = OUTPUTS_DIR / f"{stub}_payload.txt"
+            payload_path = OUTPUTS_DIR / f"{stub}_{run_id}_payload.txt"
             save_text(payload_path, payload_text)
             try:
                 output = generate_chapter(client, gen_model, slot["temp"], message_blocks)
@@ -1733,7 +1733,7 @@ def generate_quality_gated_batch(
                 slot["draft"] = None
                 progress.progress(min(0.99, generated_count / max(total_slots * max_tries, 1)))
                 continue
-            output_path = OUTPUTS_DIR / f"{stub}_output.txt"
+            output_path = OUTPUTS_DIR / f"{stub}_{run_id}_output.txt"
             save_text(output_path, output)
             scan_result = scan_draft(output)
             scan_by_run_id[run_id] = scan_result
@@ -1751,7 +1751,7 @@ def generate_quality_gated_batch(
                 "documents": list(doc_uploads.keys()),
                 "scan": scan_result,
             }
-            meta_path = OUTPUTS_DIR / f"{stub}_meta.json"
+            meta_path = OUTPUTS_DIR / f"{stub}_{run_id}_meta.json"
             save_text(meta_path, json.dumps(meta, indent=2))
             record = RunRecord(
                 run_id=run_id,
@@ -2366,7 +2366,7 @@ def run_line_graft_experiment(
     result["grafted_text"] = grafted_text
     # Diagnostic scan of the grafted output — reported but not gated.
     result["grafted_scan"] = scan_draft(grafted_text)
-    grafted_path = FINAL_DIR / f"TOP1_GRAFTED_{batch_stub}.txt"
+    grafted_path = FINAL_DIR / f"WINNER_GRAFTED_{batch_stub}_{drafts_ranked[0]["run_id"]}.txt"
     save_text(grafted_path, grafted_text)
     result["grafted_path"] = str(grafted_path)
     return result
@@ -2538,7 +2538,11 @@ def run_pipeline(
         draft_obj = next((d for d in drafts if d["run_id"] == run_id), None)
         if draft_obj is None:
             continue
-        top_filename = f"AI_RANK_{rank_pos:02d}_{batch_stub}_{run_id}.txt"
+        top_filename = (
+            f"WINNER_AI_RANK_01_{batch_stub}_{run_id}.txt"
+            if rank_pos == 1
+            else f"AI_RANK_{rank_pos:02d}_{batch_stub}_{run_id}.txt"
+        )
         top_path = FINAL_DIR / top_filename
         save_text(top_path, draft_obj["text"])
         top_paths.append(top_path)
@@ -2556,6 +2560,8 @@ def run_pipeline(
         bits.append(top_filename)
         ranking_lines.append(" | ".join(str(b) for b in bits))
     result["top_paths"] = top_paths
+    ranking_lines.insert(2, f"WINNER_RUN_ID: {result["top1_run_id"]}")
+    ranking_lines.insert(3, f"WINNER_FILE: WINNER_AI_RANK_01_{batch_stub}_{result["top1_run_id"]}.txt")
     ranking_manifest_path = FINAL_DIR / f"AI_RANKING_{batch_stub}.txt"
     save_text(ranking_manifest_path, "\n".join(ranking_lines))
     result["ranking_manifest_path"] = str(ranking_manifest_path)
@@ -2578,13 +2584,13 @@ def run_pipeline(
     if lg.get("grafted") and lg.get("grafted_text"):
         result["final_source"] = "top1_grafted"
         result["final_text"] = lg["grafted_text"]
-        final_path = FINAL_DIR / f"FINAL_{batch_stub}_top1_grafted.txt"
+        final_path = FINAL_DIR / f"FINAL_WINNER_{batch_stub}_{result["top1_run_id"]}_grafted.txt"
         save_text(final_path, lg["grafted_text"])
         result["final_path"] = str(final_path)
     else:
         result["final_source"] = "top1_ungrafted"
         result["final_text"] = top1_text
-        final_path = FINAL_DIR / f"FINAL_{batch_stub}_top1_ungrafted.txt"
+        final_path = FINAL_DIR / f"FINAL_WINNER_{batch_stub}_{result["top1_run_id"]}_ungrafted.txt"
         save_text(final_path, top1_text)
         result["final_path"] = str(final_path)
     acceptable_drafts_in_rank_order = []

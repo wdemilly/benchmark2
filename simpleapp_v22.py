@@ -2080,16 +2080,19 @@ def evaluate_drafts_with_anthropic(
         i for i in acceptable_idxs
         if quality_score_by_index[i] == top_quality_score
     ]
+    # v22+ ranking: include every ACCEPTABLE draft in the ranking, preserving
+    # the LLM's order. top_quality_idxs is still computed (and returned) for
+    # reference, but it no longer filters the ranking pool.
     if ranking:
-        ranking = [x for x in ranking if x in top_quality_idxs]
-        missing_top = [i for i in top_quality_idxs if i not in ranking]
-        ranking += missing_top
-        if missing_top and parse_status == "clean":
+        ranking = [x for x in ranking if x in acceptable_idxs]
+        missing_acceptable = [i for i in acceptable_idxs if i not in ranking]
+        ranking += missing_acceptable
+        if missing_acceptable and parse_status == "clean":
             parse_status = "partial"
     else:
-        ranking = top_quality_idxs[:]
+        ranking = acceptable_idxs[:]
     if not ranking:
-        ranking = top_quality_idxs[:] if top_quality_idxs else acceptable_idxs[:]
+        ranking = acceptable_idxs[:]
     winner_match = re.search(r"WINNER:\s*(\d+)", raw)
     if winner_match:
         winner_idx = int(winner_match.group(1))
@@ -2598,10 +2601,11 @@ def run_pipeline(
         return result
     quality_scores = result["quality_score_by_run_id"]
     top_quality_score = max((int(quality_scores.get(rid, 0) or 0) for rid in acceptable_ids), default=0)
-    retained_ids = [rid for rid in acceptable_ids if int(quality_scores.get(rid, 0) or 0) == top_quality_score]
-    if not retained_ids:
-        retained_ids = acceptable_ids[:]
-    discarded_below_top_quality_ids = [rid for rid in acceptable_ids if rid not in retained_ids]
+    # v22+ pipeline: retain every ACCEPTABLE draft for ranking and downstream
+    # stages. The old locked-target filter has been removed to match the new
+    # quality-gate semantics (gate keeps all acceptable; ship TOP 1 by ranking).
+    retained_ids = acceptable_ids[:]
+    discarded_below_top_quality_ids = []
     result["top_quality_score"] = int(top_quality_score)
     result["retained_run_ids"] = retained_ids
     result["discarded_below_top_quality_ids"] = discarded_below_top_quality_ids

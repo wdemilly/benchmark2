@@ -92,7 +92,7 @@ except ImportError:
 # ============================================================================
 # Constants
 # ============================================================================
-APP_VERSION = "v22"
+APP_VERSION = "v23"
 RUNS_DIR = Path("micro_prompt_runs")
 OUTPUTS_DIR = RUNS_DIR / "flat_outputs"
 FINAL_DIR = RUNS_DIR / "final_deliverables"
@@ -1759,7 +1759,7 @@ def generate_quality_gated_batch(
     """Generate drafts into fixed slots in a single pass. Keep every
     ACCEPTABLE draft for downstream ranking; drop UNACCEPTABLE drafts
     without retry. No target-score filtering, no slot refills — cost is
-    bounded to one generation + one evaluation per slot (v22+ behavior)."""
+    bounded to one generation + one evaluation per slot (v23+ behavior)."""
     outline_text = doc_uploads.get("Outline", "")
     payload_text = build_payload_text(prompt_text, doc_uploads)
     message_blocks = build_message_blocks(prompt_text, doc_uploads)
@@ -1896,7 +1896,7 @@ def generate_quality_gated_batch(
             locked_target_quality_score = int(round_top_quality_score)
         top_quality_score = int(round_top_quality_score)
         target_quality_score = int(locked_target_quality_score or 0)
-        # v22+ gate: retain every ACCEPTABLE draft. Scores are logged for
+        # v23+ gate: retain every ACCEPTABLE draft. Scores are logged for
         # reference but no longer filter drafts out of the ranking pool.
         retained_ids = list(acceptable_ids)
         for slot in slots:
@@ -1915,7 +1915,7 @@ def generate_quality_gated_batch(
             if rid in retained_ids:
                 update_record(csv_path, rid, {"pipeline_role": "quality_gate_retained"})
             else:
-                # Under the v22+ gate, the only non-retained case is UNACCEPTABLE.
+                # Under the v23+ gate, the only non-retained case is UNACCEPTABLE.
                 update_record(csv_path, rid, {"pipeline_role": "dropped_unacceptable"})
                 slot["draft"] = None
         retained_count = len([s for s in slots if s["draft"] is not None])
@@ -1933,7 +1933,7 @@ def generate_quality_gated_batch(
             f"retained {retained_count}/{total_slots} at target writing score {target_quality_score} "
             f"(round top {top_quality_score})"
         )
-        # v22+ gate: single pass. Dropped UNACCEPTABLE slots stay empty;
+        # v23+ gate: single pass. Dropped UNACCEPTABLE slots stay empty;
         # no refill, no retries. Cost is bounded and predictable.
         break
     final_drafts = [s["draft"] for s in slots if s["draft"] is not None]
@@ -2080,7 +2080,7 @@ def evaluate_drafts_with_anthropic(
         i for i in acceptable_idxs
         if quality_score_by_index[i] == top_quality_score
     ]
-    # v22+ ranking: include every ACCEPTABLE draft in the ranking, preserving
+    # v23+ ranking: include every ACCEPTABLE draft in the ranking, preserving
     # the LLM's order. top_quality_idxs is still computed (and returned) for
     # reference, but it no longer filters the ranking pool.
     if ranking:
@@ -2655,7 +2655,7 @@ def run_pipeline(
         return result
     quality_scores = result["quality_score_by_run_id"]
     top_quality_score = max((int(quality_scores.get(rid, 0) or 0) for rid in acceptable_ids), default=0)
-    # v22+ pipeline: retain every ACCEPTABLE draft for ranking and downstream
+    # v23+ pipeline: retain every ACCEPTABLE draft for ranking and downstream
     # stages. The old locked-target filter has been removed to match the new
     # quality-gate semantics (gate keeps all acceptable; ship TOP 1 by ranking).
     retained_ids = acceptable_ids[:]

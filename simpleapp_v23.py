@@ -3520,15 +3520,69 @@ if prompts_df.empty:
 left_col, right_col = st.columns([1, 1])
 with left_col:
     st.subheader("Prompt")
-    # Pre-select prompt 62 only
-    target_pid = 62
-    target_row = prompts_df[prompts_df["id"].astype(int) == target_pid]
-    if target_row.empty:
-        st.error(f"Prompt {target_pid} not found in {PROMPTS_CSV}.")
+    DEFAULT_PROMPT_ID = 62
+    prompt_options_df = prompts_df.copy()
+    prompt_options_df["id_numeric"] = pd.to_numeric(prompt_options_df["id"], errors="coerce")
+    invalid_prompt_count = int(prompt_options_df["id_numeric"].isna().sum())
+    prompt_options_df = prompt_options_df.dropna(subset=["id_numeric"]).copy()
+    prompt_options_df["id_int"] = prompt_options_df["id_numeric"].astype(int)
+    prompt_options_df = prompt_options_df.reset_index(drop=True)
+
+    if prompt_options_df.empty:
+        st.error(f"No usable numeric prompt IDs found in {PROMPTS_CSV}.")
         st.stop()
+    if invalid_prompt_count:
+        st.warning(
+            f"Skipped {invalid_prompt_count} row(s) in {PROMPTS_CSV} because their `id` value is not numeric."
+        )
+    if prompt_options_df["id_int"].duplicated().any():
+        st.warning(
+            f"Duplicate prompt IDs found in {PROMPTS_CSV}. The selector still works, but duplicate IDs will share the same P# in output files."
+        )
+
+    default_matches = prompt_options_df.index[prompt_options_df["id_int"] == DEFAULT_PROMPT_ID].tolist()
+    default_prompt_index = default_matches[0] if default_matches else 0
+
+    def prompt_choice_label(row_index: int) -> str:
+        row = prompt_options_df.iloc[row_index]
+        category = row.get("category", "")
+        if pd.isna(category):
+            category = ""
+        category = str(category).strip()
+        preview = str(row.get("text", "")).replace("\n", " ").strip()
+        if preview == "nan":
+            preview = ""
+        preview = preview[:80] + ("..." if len(preview) > 80 else "")
+        bits = [f"P{int(row['id_int'])}"]
+        if category:
+            bits.append(category)
+        if preview:
+            bits.append(preview)
+        return " — ".join(bits)
+
+    selected_prompt_index = st.selectbox(
+        "Prompt choice",
+        options=list(range(len(prompt_options_df))),
+        index=default_prompt_index,
+        format_func=prompt_choice_label,
+        help="This list is built from the current prompts.csv. You can add rows, delete old rows, or change the total number of prompts in that CSV.",
+    )
+    prompt_row = prompt_options_df.iloc[selected_prompt_index]
+    target_pid = int(prompt_row["id_int"])
     selected_ids = [target_pid]
-    with st.expander(f"P{target_pid} — {str(target_row.iloc[0].get('category', ''))}"):
-        st.text(str(target_row.iloc[0]["text"]))
+
+    if not default_matches:
+        st.caption(f"Default P{DEFAULT_PROMPT_ID} is not present in {PROMPTS_CSV}; using the selected prompt instead.")
+    st.caption(
+        f"{len(prompt_options_df)} usable prompt(s) loaded from `{PROMPTS_CSV}`. "
+        "Add/delete rows in the CSV, then rerun or restart the app to refresh this selector."
+    )
+
+    prompt_category = prompt_row.get("category", "")
+    if pd.isna(prompt_category):
+        prompt_category = ""
+    with st.expander(f"P{target_pid} — {str(prompt_category).strip()}"):
+        st.text(str(prompt_row["text"]))
     total_runs = len(temperatures) * repetitions
     st.write(
         f"Prompt **P{target_pid}** × **{len(temperatures)}** temps × "
@@ -3547,7 +3601,6 @@ with left_col:
                 problems.append("Outline not uploaded. The prompt references it.")
             if "Source Text" not in doc_uploads:
                 problems.append("Source text not uploaded. The prompt references it.")
-        prompt_row = prompts_df[prompts_df["id"].astype(int) == target_pid].iloc[0]
         txt = str(prompt_row["text"]).strip()
         if not txt or txt == "nan":
             problems.append(f"P{target_pid} has no prompt text (empty or NaN in prompts.csv).")

@@ -2,17 +2,6 @@
 Micro-Prompt Harness — Quality Floor + Scanner-Ranked Pipeline + Stage F + Stage G
 ==================================================================================
 Generate chapter drafts and ship TOP 1, optionally with sentence-level grafts.
-v24 (theoretical update): the evaluator and final-pass prompts no longer ask
-the model to judge drafts on sentence-level imitation of named source authors
-(v23's "Faulksian register" / "Dare/Quinn register" framing). Green-band corpus
-analysis indicates that runtime imitation pressure amplifies the sub-literary
-fingerprints the detector catches; asking the evaluator to score imitation
-success embeds the same pressure into the ranking signal and biases TOP 1
-toward drafts whose imitation pressure was strongest. v24 reframes the
-evaluation criteria as register posture (direct vs literary, plain vs
-elaborated) rather than author-mimicry success. The mechanical scanner,
-line-graft, Stage F predictor, and Stage G line-edit pipelines are unchanged
-— those operate on surface features and remain empirically validated.
 v16 adds Stage F: a ridge-regression predictor of the Originality human-score,
 fit on labeled_corpus.json and run on the final shipped text. No API call; the
 ridge lives inline. Output is a predicted score (0–100) and a recommendation
@@ -160,17 +149,17 @@ YOUR METHOD — in this order:
 1. WORD COUNTS. Note each draft's word count against the outline's target range. Flag any that are materially short or over.
 2. MECHANICAL COMPLIANCE. The scanner results are provided below. For each draft, note the violation counts. Do not re-scan — use the provided numbers. Reference them when assessing prose, but do not let them drive your quality verdict. Violations affect downstream diagnostics; your job here is writing quality.
 3. QUALITY FLOOR — one verdict per draft. For each draft, decide ACCEPTABLE or UNACCEPTABLE. Apply a LENIENT standard: mark a draft ACCEPTABLE unless you would be embarrassed to ship it. UNACCEPTABLE means one or more of:
-   - Register collapse: the POV character's interior voice is absent, the chapter has dropped into a register the outline did not specify (e.g., a literary-restraint register where the outline calls for direct first-person commercial register), or the standing requirements named in the outline are unmet for long stretches. This is a register-posture failure, not a sentence-level imitation failure — do not mark a draft UNACCEPTABLE for failing to read like a specific named author at sentence level.
+   - Voice collapse: the POV character's interior voice is absent, generic, or wrong register for long stretches.
    - Beats missing or compressed to the point of incoherence: a scene the outline requires is not on the page or is a throwaway line.
    - Dialogue that doesn't land: exchanges without subtext, without weapons, without stakes; turns that read like exposition dumps.
    - Structural failure: the chapter doesn't arrive where the outline says it arrives, or the ending doesn't close what was opened.
    - Prose-level damage: runs of flat summary where the outline asks for scene, long stretches of interpretive narration where the outline asks for observation and judgment, abandoned subplots, characters acting out of their profiles.
    Merely being less elegant than another draft is NOT grounds for UNACCEPTABLE. Stylistic difference is NOT grounds for UNACCEPTABLE. A draft can be ACCEPTABLE even if another draft is better at the same beats.
-4. QUALITY SCORE — one integer score per draft, on a 1–10 scale, where 10 is the strongest prose in this batch and 1 is the weakest prose that still functions at all. Score on prose quality only: register posture (does the chapter sit in the register the outline specified?), dialogue craft, interior sharpness, beat execution, specificity, texture, rhythm, wit. Do not score on whether the prose reads like a specific named source author at sentence level — the outline's voice instruction is register orientation, not sentence-level imitation, and drafts that read in their own voice within the specified register are not penalised. Use the scale comparatively across THIS batch. If two drafts are genuinely equal in prose quality, give them the same score. UNACCEPTABLE drafts should get a score of 0.
+4. QUALITY SCORE — one integer score per draft, on a 1–10 scale, where 10 is the strongest prose in this batch and 1 is the weakest prose that still functions at all. Score on prose quality only: voice fidelity, dialogue craft, interior sharpness, beat execution, specificity, texture, rhythm, wit. Use the scale comparatively across THIS batch. If two drafts are genuinely equal in prose quality, give them the same score. UNACCEPTABLE drafts should get a score of 0.
 5. TIE-ONLY RANKING. Rank ONLY the ACCEPTABLE drafts that received the highest QUALITY_SCORE. Omit every other draft from the ranking line, even if acceptable. The downstream AI ranking will break ties among these top-scoring drafts.
 6. GRAFT CANDIDATES. From the non-winning top-scoring drafts, name specific lines or passages worth transplanting into the eventual winner. Quote a few words for identification and name the beat where each would land. This is advisory context for the downstream graft pass.
 OUTPUT FORMAT
-For each draft, write a paragraph (3-5 sentences) covering register posture (does the chapter sit in the register the outline specified?), best moment, notable weaknesses, and a one-sentence justification for your quality verdict. Reference the scanner numbers.
+For each draft, write a paragraph (3-5 sentences) covering voice quality, best moment, notable weaknesses, and a one-sentence justification for your quality verdict. Reference the scanner numbers.
 Then on a line by itself for each draft (one line per draft):
 QUALITY: Draft N — ACCEPTABLE
 or
@@ -260,12 +249,12 @@ Quote TOP1_TEXT and DONOR_TEXT EXACTLY. Do not paraphrase. Character-level preci
 # Final pass — commercial vs literary pick across acceptable drafts
 # ============================================================================
 FINAL_PASS_PROMPT = """You will receive {N} drafts of the same chapter. The outline's GLOBAL DRAFTING CONTROLS section is the binding reference for register targets, hard caps, and per-beat contract requirements.
-Read each draft end to end. Write a craft evaluation in prose, one paragraph per draft, noting what it does well and where the register drifts. Attend to: sustained interior voice in the POV character's own register (not in any named source author's voice at sentence level), whether the named loaded scenes land with concrete specifics, whether key contract beats deliver on the page, whether the prose carries aphoristic closures, stacked periphrastic observation, or "the way X" constructions that cost the chapter's market register.
+Read each draft end to end. Write a craft evaluation in prose, one paragraph per draft, noting what it does well and where the register drifts. Attend particularly to sustained interior voice, whether the Bridget speech lands with concrete specifics, whether the Stainforth letter opens with the lease terms named on the page, whether the soldier scene carries the emotional channel and the romantic-line plant, whether the loneliness beat at locking-up is delivered, and whether the prose carries aphoristic closures, stacked periphrastic observation, or "the way X" constructions that cost commercial register.
 After the per-draft paragraphs, write a comparative paragraph that contrasts the two picks you will name and explains the trade each represents.
 Close with exactly two lines in this format, with no other text after them:
 MOST_LITERARY: T<n>
 MOST_COMMERCIAL: T<n>
-The literary pick is the draft whose prose reads with richer texture and more elaboration — longer paragraphs, more interior reflection, more willingness to slow down on a moment. The commercial pick is the draft whose prose reads with more direct register — faster movement, tighter dialogue, more willing to name what the POV character feels and to deliver the contract beats with the cleanest interior voice. Both picks are evaluated on register posture and craft execution against the outline; neither is evaluated on whether the prose imitates a named source author at sentence level.
+The literary pick is the draft that reads best as literary fiction — richer prose texture, more willing flourish, closer to the Faulksian register. The commercial pick is the draft that best fits the Dare/Quinn register and delivers the commercial contract beats with the cleanest interior voice.
 OUTLINE (GLOBAL DRAFTING CONTROLS reference)
 {outline_text}
 """
@@ -3493,17 +3482,11 @@ with st.sidebar:
     )
     st.markdown("---")
     st.subheader("Documents")
-    st.caption("Upload the files the prompt references.")
+    st.caption("v18 outlines are self-contained. Only the Outline is required.")
     doc_uploads = {}
     outline_file = st.file_uploader("Outline", type=["txt", "docx"], key="outline")
     if outline_file:
         doc_uploads["Outline"] = extract_text_from_upload(outline_file)
-    source_file = st.file_uploader("Source text (voice model)", type=["txt", "docx"], key="source")
-    if source_file:
-        doc_uploads["Source Text"] = extract_text_from_upload(source_file)
-    profiles_file = st.file_uploader("Character profiles", type=["txt", "docx"], key="profiles")
-    if profiles_file:
-        doc_uploads["Character Profiles"] = extract_text_from_upload(profiles_file)
     st.markdown("---")
     st.subheader("GitHub sync")
     if github_cfg["configured"]:
@@ -3606,12 +3589,10 @@ with left_col:
         if not temperatures:
             problems.append("No temperatures set.")
         if not doc_uploads:
-            problems.append("No documents uploaded. The model needs at least the Outline and Source text.")
+            problems.append("No documents uploaded. The model needs the Outline.")
         else:
             if "Outline" not in doc_uploads:
                 problems.append("Outline not uploaded. The prompt references it.")
-            if "Source Text" not in doc_uploads:
-                problems.append("Source text not uploaded. The prompt references it.")
         txt = str(prompt_row["text"]).strip()
         if not txt or txt == "nan":
             problems.append(f"P{target_pid} has no prompt text (empty or NaN in prompts.csv).")

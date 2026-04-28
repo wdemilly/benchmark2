@@ -3937,7 +3937,7 @@ if prompts_df.empty:
 left_col, right_col = st.columns([1, 1])
 with left_col:
     st.subheader("Prompt")
-    DEFAULT_PROMPT_ID = 62
+    DEFAULT_PROMPT_ID = 63
     prompt_options_df = prompts_df.copy()
     prompt_options_df["id_numeric"] = pd.to_numeric(prompt_options_df["id"], errors="coerce")
     invalid_prompt_count = int(prompt_options_df["id_numeric"].isna().sum())

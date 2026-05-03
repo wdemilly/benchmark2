@@ -65,3 +65,4 @@ id,category,text
 64,sentence_check,"Write this chapter from the outline.  Construct each paragraph and each sentence in the way the author named in the outline's Voice source would. Before producing the passage, check whether it matches the  movement and prose logic found in the author's source document.  Always conform to the GLOBAL DRAFTING CONTROLS."
 65,sentence_check,Follow the outline's instructions and write this chapter taking care to write naturally. 
 66,sentence_check,Follow the outline's instructions and write each sentence of this chapter while observing the Global Drafting Controls.
+67,sentence_check,Follow the outline's instructions carefully

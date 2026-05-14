@@ -1,0 +1,48 @@
+{
+  "regression": {
+    "intercept": 83.44736842105263,
+    "coefficients": {
+      "last_third_green_pct": 3.996904563151052,
+      "deep_green_pct": 5.404128330088622,
+      "longest_warm_run": -3.586169669807568,
+      "orange_to_green_recoveries": -6.07817705311161,
+      "last_third_orange_pct": 1.7958456293816516
+    },
+    "feature_means": {
+      "last_third_green_pct": 50.46736842105263,
+      "deep_green_pct": 32.883421052631576,
+      "longest_warm_run": 6.342105263157895,
+      "orange_to_green_recoveries": 4.473684210526316,
+      "last_third_orange_pct": 16.73315789473684
+    },
+    "feature_stds": {
+      "last_third_green_pct": 13.703985529421056,
+      "deep_green_pct": 9.030984756094982,
+      "longest_warm_run": 3.0717414552444082,
+      "orange_to_green_recoveries": 5.102820902543504,
+      "last_third_orange_pct": 18.499761891108243
+    },
+    "calibrated": true,
+    "metrics": {
+      "in_sample_correlation": 0.959,
+      "in_sample_rmse": 4.44,
+      "loo_correlation": 0.944,
+      "loo_rmse": 5.17,
+      "n_samples": 38,
+      "n_features": 5
+    }
+  },
+  "excluded_files": [
+    "export(51)   44 R1.docx",
+    "export(51) 38 R1.docx",
+    "export(51) 38 R2.docx",
+    "export(51) 44 R2.docx",
+    "export(90) 96 .docx"
+  ],
+  "exclusion_reasons": {
+    "export(51) 38 R1.docx + export(90) 96 .docx": "identical content, contradictory score labels",
+    "export(51) cluster (3 files)": "anomalous bands vs score; flagged by operator for exclusion"
+  },
+  "feature_set": "categorical_6band_v1",
+  "note": "Book-agnostic calibration including regency, paranormal, contemporary, and literary fiction registers."
+}

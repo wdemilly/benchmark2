@@ -146,10 +146,10 @@ with col3:
 st.subheader("Scoring backend")
 scorer_choice = st.radio(
     "Where do scores come from?",
-    ["originality", "local", "both"],
+    ["local", "originality", "both"],
     format_func=lambda s: {
+        "local": "Local scorer (free; LOO r=0.944 against your corpus)",
         "originality": "Originality.ai API (paid)",
-        "local": "Local scorer (free; requires calibration.json)",
         "both": "Both — route on Originality, log local for validation",
     }[s],
     horizontal=True,
@@ -373,33 +373,41 @@ with st.sidebar:
             "or set ANTHROPIC_API_KEY"
         )
 
-    try:
-        import originality_api
-        has_originality = bool(
-            originality_api.API_KEY
-            or os.environ.get("ORIGINALITY_API_KEY")
-        )
-    except Exception:
-        has_originality = False
-    if has_originality:
-        st.success("Originality.ai key available")
-    else:
-        st.error(
-            "No Originality.ai key — paste into "
-            "originality_api.py or set ORIGINALITY_API_KEY"
-        )
+    # Only check for Originality.ai key when the selected scorer needs it
+    if scorer_choice in ("originality", "both"):
+        try:
+            import originality_api
+            has_originality = bool(
+                originality_api.API_KEY
+                or os.environ.get("ORIGINALITY_API_KEY")
+            )
+        except Exception:
+            has_originality = False
+        if has_originality:
+            st.success("Originality.ai key available")
+        else:
+            st.error(
+                "No Originality.ai key — required for the selected "
+                "scorer. Paste into originality_api.py or set "
+                "ORIGINALITY_API_KEY."
+            )
 
     st.markdown("### Files in working dir")
-    for fname in (
+    required = (
         "orchestrator.py",
-        "originality_api.py",
-        "stage_g_interface.py",
+        "local_scorer.py",
+        "extended_band_features.py",
+        "band_classifier.py",
         "reader_prompt_v1.txt",
-    ):
+    )
+    for fname in required:
         if (cwd / fname).exists():
             st.success(fname)
         else:
             st.error(f"{fname} missing")
+    # originality_api.py is optional — only needed if you pick that scorer
+    if (cwd / "originality_api.py").exists():
+        st.caption("originality_api.py present (optional)")
 
     st.markdown("### Recent runs")
     runs_dir = cwd / "phase2_runs"

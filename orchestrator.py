@@ -80,7 +80,6 @@ except ImportError:
     )
     raise
 
-import originality_api
 import stage_g_interface
 import local_scorer
 
@@ -395,6 +394,7 @@ def score_draft(
                            for validation analysis
     """
     if config.scorer == "originality":
+        import originality_api
         score, response = originality_api.score_text(text)
         return score, {"backend": "originality", "originality": response}
 
@@ -403,6 +403,7 @@ def score_draft(
         return score, {"backend": "local", "local": response}
 
     # scorer == "both" — call both, route on Originality, log delta.
+    import originality_api
     orig_score, orig_response = originality_api.score_text(text)
     try:
         local_score, local_response = local_scorer.score_text(text)

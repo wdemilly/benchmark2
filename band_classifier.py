@@ -18,6 +18,19 @@ band thresholds rather than its own internal sense of AI-likeness.
 The band sequence this module produces is consumed by
 contagion_metrics.py to compute contagion zones and per-band shares,
 which are the actual predictors of the headline score.
+
+CHANGE LOG
+----------
+Removed the explicit ``temperature=0.0`` argument from the
+messages.create() call in _classify_chunk. claude-opus-4-7 deprecated
+the temperature parameter and returns a 400 BadRequestError when it
+is supplied. Determinism is still substantially preserved by the
+constrained system prompt, the structured-JSON output contract, and
+the anchor calibration. The original line was:
+
+    temperature=0.0,   # classifier should be deterministic
+
+and the surrounding messages.create() call is otherwise unchanged.
 """
 
 from __future__ import annotations
@@ -323,10 +336,15 @@ class BandClassifier:
     def _classify_chunk(self, sentences: list[str]) -> list[str]:
         system = self._build_system_prompt()
         user = self._build_user_message(sentences)
+        # NOTE: the original implementation passed temperature=0.0 here to
+        # force deterministic output. claude-opus-4-7 deprecated the
+        # temperature parameter and rejects it with a 400 BadRequestError.
+        # The argument is intentionally omitted; determinism is preserved
+        # by the constrained system prompt, the structured-JSON output
+        # contract, and anchor calibration.
         response = self.client.messages.create(
             model=self.config.model,
             max_tokens=MAX_TOKENS_PER_CALL,
-            temperature=0.0,   # classifier should be deterministic
             system=system,
             messages=[{"role": "user", "content": user}],
         )

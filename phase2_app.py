@@ -143,6 +143,39 @@ with col3:
         min_value=0, max_value=100, value=94,
     )
 
+st.subheader("Scoring backend")
+scorer_choice = st.radio(
+    "Where do scores come from?",
+    ["originality", "local", "both"],
+    format_func=lambda s: {
+        "originality": "Originality.ai API (paid)",
+        "local": "Local scorer (free; requires calibration.json)",
+        "both": "Both — route on Originality, log local for validation",
+    }[s],
+    horizontal=True,
+    label_visibility="collapsed",
+)
+
+calibration_path_input = None
+if scorer_choice in ("local", "both"):
+    default_cal = cwd / "calibration.json"
+    calibration_str = st.text_input(
+        "Path to calibration.json",
+        value=str(default_cal),
+        help="Produced by corpus_calibrator.py. If the file does not "
+             "exist, the local scorer uses placeholder coefficients "
+             "and predictions will be unreliable.",
+    )
+    calibration_path_input = Path(calibration_str) if calibration_str else None
+    if calibration_path_input and calibration_path_input.exists():
+        st.success(f"Calibration file found: {calibration_path_input.name}")
+    else:
+        st.warning(
+            "Calibration file not found at that path — local scorer "
+            "will use placeholder coefficients. Run corpus_calibrator.py "
+            "first if you want real predictions."
+        )
+
 with st.expander("Override drafting prompt (optional)"):
     st.caption(
         "By default the embedded DRAFTING_PROMPT in orchestrator.py "
@@ -206,6 +239,8 @@ if run_clicked:
         drafter_model=drafter_model,
         reader_model=reader_model,
         chapter_label=safe_label,
+        scorer=scorer_choice,
+        calibration_path=calibration_path_input,
     )
 
     with st.status(
@@ -326,11 +361,17 @@ with st.sidebar:
     st.markdown("### Environment")
 
     import os
-    has_anthropic = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    has_anthropic = bool(
+        orchestrator.ANTHROPIC_API_KEY
+        or os.environ.get("ANTHROPIC_API_KEY")
+    )
     if has_anthropic:
-        st.success("ANTHROPIC_API_KEY set")
+        st.success("ANTHROPIC_API_KEY available")
     else:
-        st.error("ANTHROPIC_API_KEY not set")
+        st.error(
+            "No Anthropic key — paste into orchestrator.py "
+            "or set ANTHROPIC_API_KEY"
+        )
 
     try:
         import originality_api

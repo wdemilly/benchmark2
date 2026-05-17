@@ -120,7 +120,8 @@ unchanged, MAX_REGEN_ITERATIONS and the temperature bump schedule are
 unchanged, Stage G's internal logic (G1/G2/G3/G4) is unchanged. The
 change is entirely in the decision layer between Stage G's output and
 the regen loop's accounting.
-v36.28 also adds a Q3 specificity-preservation gate. The graft commit
+v36.29 adds a Q3 specificity-preservation gate (revising v36.28; the
+Stage G accountability work above remains v36.28's). The graft commit
 pass previously had two deterministic backstops after the LLM's COMMIT:
 the clean-donor filter (donor free of hard-cap patterns) and the
 verbatim-match check. Neither verified that the donor preserved the
@@ -252,7 +253,7 @@ except Exception as _ls_exc:  # broad — import failures, syntax errors, missin
 # ============================================================================
 # Constants
 # ============================================================================
-APP_VERSION = "v36.28"
+APP_VERSION = "v36.29"
 RUNS_DIR = Path("micro_prompt_runs")
 OUTPUTS_DIR = RUNS_DIR / "flat_outputs"
 FINAL_DIR = RUNS_DIR / "final_deliverables"
@@ -2708,7 +2709,7 @@ def _build_scanner_summary_text(drafts_ranked: list, scan_by_run_id: dict) -> st
         )
     return "\n".join(lines)
 # ============================================================================
-# v36.28: Stage Q3 specificity-preservation gate (book-agnostic)
+# v36.29: Stage Q3 specificity-preservation gate (book-agnostic)
 # ============================================================================
 #
 # The May-6 finding: the graft commit pass trends toward replacing strange-
@@ -3110,7 +3111,7 @@ def run_line_graft_experiment(
             result["grafts_rejected_dirty_donor"].append(c)
     if not clean_commits:
         return result
-    # v36.28 specificity-preservation gate. Runs after the clean-donor
+    # v36.29 specificity-preservation gate. Runs after the clean-donor
     # filter and before substitution — the same architectural position as
     # _donor_sentence_is_clean. Rejects any committed graft whose donor
     # strips a material fraction of the concrete specificity the TOP 1 text
@@ -3575,7 +3576,7 @@ def run_pipeline(
                         result["line_edit"] = {
                             "ran": False,
                             "enabled": True,
-                            "error": f"Stage G crashed under v36.28 invoke: {e}",
+                            "error": f"Stage G crashed under v36.29 invoke: {e}",
                             "original_text": pre_text,
                             "edited_text": pre_text,
                             "mechanical": {},

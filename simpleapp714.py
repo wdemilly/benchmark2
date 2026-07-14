@@ -372,6 +372,7 @@ def main():
     if book is not None:
         book_text = read_book_file(book.getvalue())
         parsed = split_book(book_text)
+        outline = book_text.strip()
         if parsed:
             preamble, chapters, titles, notes = parsed
             numbers = sorted(chapters)
@@ -380,15 +381,21 @@ def main():
                 format_func=lambda n: (f"Chapter {n} — {titles[n]}"
                                        if titles[n] else f"Chapter {n}"))
             pick_title = titles[pick]
-            outline = book_text.strip()
             st.caption(
                 f"{len(chapters)} chapters found. The WHOLE book "
                 f"({len(outline.split())} words) goes to Step 1 with "
                 f"Chapter {pick} named as the one to convert — the recipe "
                 f"the incognito tests validated.")
         else:
-            st.error("No CHAPTER headings found in that file. "
-                     "Paste the chapter below instead.")
+            st.warning(
+                "No CHAPTER headings were recognized in this file, so the "
+                "chapter list cannot be built. Name the chapter below; the "
+                "whole file still goes to Step 1 with that chapter named.")
+            pick = int(st.number_input("Chapter number to convert:",
+                                       min_value=1, max_value=99,
+                                       value=1, step=1))
+            pick_title = st.text_input(
+                "Chapter title (optional; helps Step 1 find it):").strip()
     if not outline:
         outline = st.text_area(
             "Or paste a single chapter outline (book-level notes may ride "

@@ -26,6 +26,11 @@ yet (LEDGER_BAND_PREDICTOR.md, Entry 11). The seam for it is
 Originality is used only for Walter's manual random audits, outside this
 script.
 
+The outline can arrive two ways: load the whole-book outline file (a real
+.docx or a text file wearing the extension) and pick a chapter from it, in
+which case the chapter travels to Step 1 wrapped in the book-level notes;
+or paste a single chapter outline directly.
+
 Run, from the folder containing this file and the three Step files:
 
     streamlit run simpleapp714.py
@@ -136,6 +141,55 @@ def warm_mode_count(full_text):
 
     density = 1000.0 * sum(counts.values()) / narr_words
     return counts, density, stretches[:MAX_TARGET_STRETCHES]
+
+# ------------------------------------------------------------ the book file
+
+CHAPTER_HEAD = re.compile(
+    r"^\s*#{0,4}\s*CHAPTER\s+(\d+)\b[:.\u2014\-\s]*(.*)$", re.I)
+NOTES_HEAD = re.compile(r"^\s*#{1,3}\s+\S")
+
+def read_book_file(data):
+    """A real .docx (a zip) or a plain-text file under any name."""
+    import html as _html
+    import io
+    import zipfile
+    if data[:2] == b"PK":
+        z = zipfile.ZipFile(io.BytesIO(data))
+        xml = z.read("word/document.xml").decode("utf-8", "replace")
+        xml = re.sub(r"</w:p>", "\n", xml)
+        xml = re.sub(r"<[^>]+>", "", xml)
+        return _html.unescape(xml)
+    return data.decode("utf-8", "replace")
+
+def split_book(text):
+    """Split a whole-book outline into (preamble, {number: chapter text},
+    {number: title}, trailing notes). Returns None if no CHAPTER headings
+    are found."""
+    lines = text.split("\n")
+    marks = []
+    for i, line in enumerate(lines):
+        m = CHAPTER_HEAD.match(line)
+        if m:
+            marks.append((i, int(m.group(1)), m.group(2).strip()))
+    if not marks:
+        return None
+    preamble = "\n".join(lines[:marks[0][0]]).strip()
+    chapters, titles = {}, {}
+    for k, (i, num, title) in enumerate(marks):
+        end = marks[k + 1][0] if k + 1 < len(marks) else len(lines)
+        chapters[num] = "\n".join(lines[i:end]).strip()
+        titles[num] = title
+    # peel trailing book-level notes off the final chapter: the first
+    # heading after it that is not itself a CHAPTER heading
+    last = max(chapters)
+    body = chapters[last].split("\n")
+    notes = ""
+    for j in range(1, len(body)):
+        if NOTES_HEAD.match(body[j]) and not CHAPTER_HEAD.match(body[j]):
+            notes = "\n".join(body[j:]).strip()
+            chapters[last] = "\n".join(body[:j]).strip()
+            break
+    return preamble, chapters, titles, notes
 
 # ------------------------------------------------------------ the predictor
 
@@ -296,9 +350,33 @@ def main():
             min_value=0.0, max_value=60.0,
             value=DEFAULT_THRESHOLD, step=1.0)
 
-    outline = st.text_area(
-        "Paste the chapter outline (book-level notes may ride along "
-        "before or after it):", height=350)
+    book = st.file_uploader(
+        "Book outline file — load it and pick the chapter "
+        "(.docx or a text file):", type=["docx", "txt", "md"])
+    outline = ""
+    if book is not None:
+        parsed = split_book(read_book_file(book.getvalue()))
+        if parsed:
+            preamble, chapters, titles, notes = parsed
+            numbers = sorted(chapters)
+            pick = st.selectbox(
+                "Chapter to send to Step 1:", numbers,
+                format_func=lambda n: (f"Chapter {n} — {titles[n]}"
+                                       if titles[n] else f"Chapter {n}"))
+            outline = "\n\n".join(
+                p for p in (preamble, chapters[pick], notes) if p).strip()
+            st.caption(
+                f"{len(chapters)} chapters found. Chapter {pick} is "
+                f"{len(chapters[pick].split())} words; the book-level notes "
+                f"riding along are "
+                f"{len(preamble.split()) + len(notes.split())} words.")
+        else:
+            st.error("No CHAPTER headings found in that file. "
+                     "Paste the chapter below instead.")
+    if not outline:
+        outline = st.text_area(
+            "Or paste a single chapter outline (book-level notes may ride "
+            "along before or after it):", height=300)
 
     if st.button("Run the pipeline", type="primary"):
         if not key:
@@ -316,6 +394,8 @@ def main():
 
         def save(name, text):
             (run_dir / name).write_text(text, encoding="utf-8")
+
+        save("0_step1_input.txt", outline)
 
         # ---- Window 1: normalize
         with st.status("Window 1 — normalizing the outline...",

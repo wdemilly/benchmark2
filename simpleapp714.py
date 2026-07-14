@@ -26,10 +26,11 @@ yet (LEDGER_BAND_PREDICTOR.md, Entry 11). The seam for it is
 Originality is used only for Walter's manual random audits, outside this
 script.
 
-The outline can arrive two ways: load the whole-book outline file (a real
-.docx or a text file wearing the extension) and pick a chapter from it, in
-which case the chapter travels to Step 1 wrapped in the book-level notes;
-or paste a single chapter outline directly.
+The outline can arrive two ways. Load the whole-book outline file (a real
+.docx or a text file wearing the extension) and pick a chapter: the ENTIRE
+book goes to Step 1 with that chapter named as the one to convert, which is
+the recipe Walter's incognito tests validated (the drafter saw the full
+book, not an excerpt). Or paste a single chapter outline directly.
 
 Run, from the folder containing this file and the three Step files:
 
@@ -273,8 +274,20 @@ def load_step(n):
         st.stop()
     return path.read_text(encoding="utf-8")
 
-def build_step1(outline):
-    return (load_step(1).rstrip() + "\n\n=== EXISTING CHAPTER OUTLINE ===\n"
+def build_step1(outline, chapter_number=None, chapter_title=""):
+    head = load_step(1).rstrip()
+    if chapter_number is not None:
+        name = (f"CHAPTER {chapter_number}"
+                + (f": {chapter_title}" if chapter_title else ""))
+        return (head
+                + f"\n\nTHE CHAPTER TO CONVERT IS {name}. The rest of the"
+                " document below is the full book outline; treat everything"
+                " outside the named chapter as book-level notes, per the"
+                " INPUT instructions."
+                "\n\n=== EXISTING CHAPTER OUTLINE (FULL BOOK — CONVERT ONLY"
+                " THE NAMED CHAPTER) ===\n"
+                + outline.strip() + "\n")
+    return (head + "\n\n=== EXISTING CHAPTER OUTLINE ===\n"
             + outline.strip() + "\n")
 
 def build_step2(packet):
@@ -354,8 +367,11 @@ def main():
         "Book outline file — load it and pick the chapter "
         "(.docx or a text file):", type=["docx", "txt", "md"])
     outline = ""
+    pick = None
+    pick_title = ""
     if book is not None:
-        parsed = split_book(read_book_file(book.getvalue()))
+        book_text = read_book_file(book.getvalue())
+        parsed = split_book(book_text)
         if parsed:
             preamble, chapters, titles, notes = parsed
             numbers = sorted(chapters)
@@ -363,13 +379,13 @@ def main():
                 "Chapter to send to Step 1:", numbers,
                 format_func=lambda n: (f"Chapter {n} — {titles[n]}"
                                        if titles[n] else f"Chapter {n}"))
-            outline = "\n\n".join(
-                p for p in (preamble, chapters[pick], notes) if p).strip()
+            pick_title = titles[pick]
+            outline = book_text.strip()
             st.caption(
-                f"{len(chapters)} chapters found. Chapter {pick} is "
-                f"{len(chapters[pick].split())} words; the book-level notes "
-                f"riding along are "
-                f"{len(preamble.split()) + len(notes.split())} words.")
+                f"{len(chapters)} chapters found. The WHOLE book "
+                f"({len(outline.split())} words) goes to Step 1 with "
+                f"Chapter {pick} named as the one to convert — the recipe "
+                f"the incognito tests validated.")
         else:
             st.error("No CHAPTER headings found in that file. "
                      "Paste the chapter below instead.")
@@ -395,13 +411,16 @@ def main():
         def save(name, text):
             (run_dir / name).write_text(text, encoding="utf-8")
 
-        save("0_step1_input.txt", outline)
+        save("0_step1_input.txt",
+             (f"[CHAPTER TO CONVERT: {pick} — {pick_title}]\n\n" if pick
+              else "") + outline)
 
         # ---- Window 1: normalize
         with st.status("Window 1 — normalizing the outline...",
                        expanded=False) as s:
-            packet, ti, to = call_model(client, build_step1(outline),
-                                        MAX_TOKENS[1], s)
+            packet, ti, to = call_model(
+                client, build_step1(outline, pick, pick_title),
+                MAX_TOKENS[1], s)
             tokens_in += ti; tokens_out += to
             save("1_packet.txt", packet)
             s.update(label=f"Window 1 done — packet "

@@ -1,0 +1,120 @@
+STEP 3 — HARDENING PASS
+v1 — 2026-07-14 (formerly Prompt 0d; replaces the retired Prompt 0b and Prompt 0c)
+
+PIPELINE POSITION
+Runs on the raw draft from Step 2. It removes drafting-control violations AND
+applies the two validated hardening operations before the first scan. The
+pipeline is three windows and one scan: Step 1 normalize, Step 2 draft, Step 3
+this pass, scan. If the scan comes back under 90, this same prompt is run again
+on the scanned document, targeting the warm stretches the shading marks.
+
+WHAT THIS PROMPT IS BUILT ON
+Validated on real Originality Turbo scans, 14 July 2026. One chapter was walked
+from 79 to 91 in two passes of exactly these operations (ledger Entries 13-15).
+The same operations moved a second document from 80 to 93 and a third from 79 to
+95 (9 July). Four applications, four gains. The operations below are the ones
+that worked, stated in the order of their measured strength.
+
+ROLE
+You are a reviser working to a fixed outline. You may rewrite prose. You may not
+invent story.
+
+THE BINDING CONSTRAINT
+You may not add, remove, or reorder any plot event, beat, reveal, plant, or
+continuity item. You may not change POV, tense, setting, time, the chapter's
+ending, or what any character wants, hides, learns, or decides. The outline is
+the authority. Raising a score by inventing story is a failure, not a success.
+
+OPERATION 1 — NAME THINGS (strongest measured lever: named places read 4.8
+points colder, named characters 3.3)
+
+Go through the narration. Wherever it reaches for a category word, and the
+outline or the chapter's own established world supplies the particular, use the
+particular.
+
+   the mountains        ->  the Bighorns
+   the local land office->  the Roan Creek land office
+   below town           ->  below Roan Creek
+   he (where it bears)  ->  Nels
+
+Use the character's name in narration rather than a pronoun where the sentence
+will bear it. If the outline does not supply the particular, do not invent it —
+an invented name is a continuity error, and a continuity error is worse than a
+low score.
+
+OPERATION 2 — THE THREE MOVES, applied to the whole narration
+
+Move 1. Break the long braided sentence — two or more clauses chained with
+"and," especially with a trailing participial phrase — into shorter declaratives
+of VARIED length. Do not produce runs of clipped five-word sentences; three
+short sentences in a row is itself a machine signal. Mix one longer plain
+sentence among the short ones.
+   Before: "You stood there with the glass in your hand and the phone buzzing
+   itself in a slow circle on the tile, and I made myself stay where I was."
+   After: "You stood there with the glass in your hand. The phone buzzed against
+   the tile. I stayed where I was at the sink."
+
+Move 2. Cut the simile, the elegant appositive, and the polished epigram.
+Replace each with a concrete fact from the scene, or with nothing.
+   Before: "an offer that would have been an insult if the man had been in any
+   position to be insulted"
+   After: "the price he offered would not have bought the barn"
+   Before: "a pause, the wind doing the talking"
+   After: "he paused; the wind was audible"
+
+Move 3. Break the echo. Where a word or phrase repeats to make a parallel —
+across two sentences, across two dialogue lines, or inside one sentence — keep
+one instance and rebuild the other without the repeated word.
+   Before: "the other chair sat empty where it had sat empty for five months"
+   After: "the other chair had not been filled in five months"
+   Before: dialogue lines each repeating "the full window"
+   After: the same lines, each phrased differently, no shared noun.
+
+Also cut, in narration only: every "the way [x] [verbs]" construction; "as
+though"/"as if" comparisons; colons introducing explanations; em dashes beyond
+four per chapter. Speech is exempt throughout — characters may talk however
+they talk, and dialogue may keep natural comparison and repetition where it
+sounds like a person.
+
+OPERATION 3 — PROTECT THE ANCHORS. Do this before touching anything.
+
+Find the two or three strongest passages in the chapter — the most particular,
+most physical, most unmistakably authored prose. LEAVE THEM COMPLETELY ALONE,
+even where they contain a construction Operation 2 names. A chapter of uniform
+competence scores worse than a chapter carrying a few passages of undeniable
+life. Uniformity is the failure mode this prompt exists to prevent.
+
+0b CARRY-OVER — the drafting-control sweep
+
+After the three operations, check the draft against the outline's GLOBAL
+DRAFTING CONTROLS and fix surviving violations by the lightest edit that removes
+each one. This replaces the separate 0b pass.
+
+SECOND-RUN MODE (only when the input is a scanned document with shading)
+Confine every edit to the warm stretches the shading marks, plus any category
+word Operation 1 can name anywhere in the narration. Touch nothing cold except
+for naming. The anchors are the coldest passages; re-derive them from the
+shading and leave them alone.
+
+OUTPUT
+Return two parts, in this order, with these exact delimiters and nothing else.
+
+=== REVISED CHAPTER (CLEAN — COPY THIS FORWARD) ===
+The full revised chapter as plain text, normal paragraph breaks, no title,
+headers, commentary, or marks of any kind.
+=== END REVISED CHAPTER ===
+
+=== CHANGE LOG ===
+   THINGS NAMED — one line each: general word before, particular after, and what
+   authorised it.
+   MOVES APPLIED — one line each: which move, before, after.
+   ANCHORS PROTECTED — the passages left untouched, one line each.
+   CONTROL FIXES — one line each: cap broken, fix made.
+   NOT TOUCHED — anything seen and deliberately left, and why.
+=== END CHANGE LOG ===
+
+DRAFT
+[PASTE DRAFT HERE]
+
+OUTLINE (with GLOBAL DRAFTING CONTROLS)
+[PASTE OUTLINE HERE]

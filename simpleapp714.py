@@ -221,9 +221,12 @@ def load_api_key():
     return "", "none"
 
 def call_model(client, prompt_text, max_tokens, status_slot):
-    """One streamed call at the pinned model and effort. Returns
-    (text, input_tokens, output_tokens). Falls back if the installed
-    SDK predates the effort control, and says so on screen."""
+    """One non-streaming call at the pinned model and effort. Returns
+    (text, input_tokens, output_tokens). Streaming was removed because on
+    Streamlit Community Cloud the websocket is cut during long quiet calls,
+    which left the spinner turning forever over a dead request. A plain
+    request either returns or raises; any failure is shown on the page.
+    Falls back through effort forms if the installed SDK is older."""
     base = dict(
         model=MODEL,
         max_tokens=max_tokens,
@@ -239,21 +242,18 @@ def call_model(client, prompt_text, max_tokens, status_slot):
     last_error = None
     for i, kwargs in enumerate(attempts):
         try:
-            pieces = []
-            with client.messages.stream(**kwargs) as stream:
-                for chunk in stream.text_stream:
-                    pieces.append(chunk)
-                    if len(pieces) % 40 == 0:
-                        status_slot.write(
-                            f"writing... {len(''.join(pieces).split())} words")
-                final = stream.get_final_message()
+            status_slot.write("waiting for the model...")
+            msg = client.messages.create(timeout=1800, **kwargs)
             if i == 2:
                 st.warning(
                     "The installed anthropic library rejected the effort "
                     "setting. The call ran at the API default. Upgrade the "
                     "library with: pip install --upgrade anthropic")
-            usage = final.usage
-            return ("".join(pieces),
+            text = "".join(
+                block.text for block in msg.content
+                if getattr(block, "type", None) == "text")
+            usage = msg.usage
+            return (text,
                     getattr(usage, "input_tokens", 0),
                     getattr(usage, "output_tokens", 0))
         except TypeError as e:
@@ -262,7 +262,7 @@ def call_model(client, prompt_text, max_tokens, status_slot):
         except anthropic.BadRequestError as e:
             last_error = e
             continue
-    raise RuntimeError(f"All call forms failed. Last error: {last_error}")
+    raise RuntimeError(f"The model call failed. Last error: {last_error}")
 
 # ----------------------------------------------------------- prompt plumbing
 
@@ -274,9 +274,10 @@ def load_step(n):
         st.stop()
     return path.read_text(encoding="utf-8")
 
-def build_step1(outline, chapter_number=None, chapter_title=""):
+def build_step1(outline, chapter_number=None, chapter_title="",
+                whole_book=False):
     head = load_step(1).rstrip()
-    if chapter_number is not None:
+    if whole_book and chapter_number is not None:
         name = (f"CHAPTER {chapter_number}"
                 + (f": {chapter_title}" if chapter_title else ""))
         return (head
@@ -369,10 +370,10 @@ def main():
     outline = ""
     pick = None
     pick_title = ""
+    whole_book = False
     if book is not None:
         book_text = read_book_file(book.getvalue())
         parsed = split_book(book_text)
-        outline = book_text.strip()
         if parsed:
             preamble, chapters, titles, notes = parsed
             numbers = sorted(chapters)
@@ -381,16 +382,25 @@ def main():
                 format_func=lambda n: (f"Chapter {n} — {titles[n]}"
                                        if titles[n] else f"Chapter {n}"))
             pick_title = titles[pick]
+            # Send ONLY the chosen chapter. The Reference System from the
+            # front matter and the Master Notes from the back ride along,
+            # because the chapter's beats are written in those codes; the
+            # other 29 chapters do not.
+            outline = "\n\n".join(
+                p for p in (preamble, chapters[pick], notes) if p).strip()
             st.caption(
-                f"{len(chapters)} chapters found. The WHOLE book "
-                f"({len(outline.split())} words) goes to Step 1 with "
-                f"Chapter {pick} named as the one to convert — the recipe "
-                f"the incognito tests validated.")
+                f"{len(chapters)} chapters found. Chapter {pick} goes to "
+                f"Step 1 on its own ({len(chapters[pick].split())} words), "
+                f"with the Reference System and Master Notes "
+                f"({len(preamble.split()) + len(notes.split())} words) "
+                f"riding along so the chapter's codes resolve.")
         else:
+            outline = book_text.strip()
+            whole_book = True
             st.warning(
-                "No CHAPTER headings were recognized in this file, so the "
-                "chapter list cannot be built. Name the chapter below; the "
-                "whole file still goes to Step 1 with that chapter named.")
+                "No CHAPTER headings were recognized, so the chapter cannot "
+                "be isolated. The whole file goes to Step 1 with the chapter "
+                "you name below.")
             pick = int(st.number_input("Chapter number to convert:",
                                        min_value=1, max_value=99,
                                        value=1, step=1))
@@ -426,7 +436,7 @@ def main():
         with st.status("Window 1 — normalizing the outline...",
                        expanded=False) as s:
             packet, ti, to = call_model(
-                client, build_step1(outline, pick, pick_title),
+                client, build_step1(outline, pick, pick_title, whole_book),
                 MAX_TOKENS[1], s)
             tokens_in += ti; tokens_out += to
             save("1_packet.txt", packet)

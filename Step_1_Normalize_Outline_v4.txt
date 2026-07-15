@@ -1,0 +1,342 @@
+STEP 1 — NORMALIZE EXISTING CHAPTER OUTLINE TO v21-COMPATIBLE DRAFTING PACKET
+(formerly normalize_outline_v4)
+
+You are converting an existing detailed chapter outline into a v21-compatible drafting packet.
+
+This is not a story-generation task.
+This is not a brainstorming task.
+This is not a rewrite of the chapter plan.
+This is not a critique.
+
+Your job is to preserve the existing chapter outline and retrofit it into a self-contained drafting packet with v21-style GLOBAL DRAFTING CONTROLS.
+
+The output must be usable by a chapter-drafting model without needing the master outline, profiles, source file, prior prompts, or any separate v21 reference.
+
+INPUT
+
+You will receive:
+
+=== EXISTING CHAPTER OUTLINE ===
+[pasted chapter outline]
+
+Optional book-level notes may appear before or after the chapter. Use them only to infer genre, POV posture, market position, recurring objects, relationship arc, mystery arc, and continuity.
+
+CORE TASK
+
+Preserve the existing chapter plan.
+
+Preserve:
+- novel title, if present
+- chapter number and title
+- POV
+- tense
+- setting
+- time
+- word count target
+- scene summary
+- character wants and hidings
+- scene texture sequence
+- emotional arc
+- purpose
+- key details / objects / moments
+- dialogue opportunities
+- end hook
+- all continuity plants and reveals
+- all relationship, mystery, subplot, and genre beats
+
+Do not add new plot events unless a transition is absolutely required for continuity.
+Do not remove existing plot events.
+Do not change the chapter’s ending.
+Do not change POV, tense, setting, relationship movement, mystery movement, genre beat, or chapter function.
+Do not make the chapter more literary than the source outline requires.
+Do not insert polished sample prose.
+Do not write dialogue lines unless the existing outline already gives exact required dialogue.
+
+Your main additions are:
+1. normalize the chapter into the v21 section order;
+2. add a Voice Source paragraph;
+3. add Chapter Function;
+4. add Emotional Arc;
+5. add GLOBAL DRAFTING CONTROLS;
+6. add the compact v21 hard caps below;
+7. add Required throughout;
+8. add Avoid throughout;
+9. add Mechanical register;
+10. convert or preserve the existing scene texture sequence as MICROBEATS;
+11. preserve or lightly organize Dialogue Summary;
+12. add Scene Beat Distribution;
+13. add a chapter-specific Continuity Checklist.
+
+LENGTH CONTROL
+
+The output should be long enough to guide drafting but not bloated.
+
+Target:
+- for a 2,300–2,800 drafted-word chapter: 3,000–4,000 outline words;
+- for a 3,400–4,200 drafted-word chapter: 4,000–5,200 outline words;
+- absolute ceiling: 1.4x the chapter’s drafted word-count target unless the existing outline is already longer.
+
+Do not run visible self-tests.
+Do not explain what you changed.
+Do not include commentary outside the final outline.
+Do not include version history.
+
+STYLE OF THE OUTLINE
+
+Write the outline as a working editor’s brief to a drafter.
+Use direct dramatic language.
+Do not use literary-critical phrasing.
+Name who wants what, who blocks it, what changes, what the reader should feel.
+Say things once where they matter.
+Do not turn the outline into a checklist of abstract compliance rules.
+
+OUTPUT FORMAT
+
+BEGIN OUTLINE
+
+[NOVEL TITLE IN CAPITALS]
+[Chapter number and title]
+Chapter Outline
+POV: [character name] — [First person / close third], [tense]
+Setting: [location]
+Time: [date or period]
+Word count target: [range]
+
+[Voice Source paragraph, 80–120 words. It must name the market position, the genre/subgenre, the chapter’s position in the novel, and the emotional contract. Tradition names may be used only as market orientation, not as sentence-level imitation. Do not use “match,” “mirror,” “draw from,” “in the manner of,” or “construct sentences as” as directives to the drafter. If a register should be avoided, name it negatively: “Do not draw on [excluded register/author]; this chapter needs [commercial/direct/romance/action/etc.] handling.”]
+
+Chapter Function
+
+[One paragraph, 150–200 words. Preserve the original chapter purpose. Start with the structural role in blunt terms. Name what the chapter establishes, plants, introduces, reveals, or turns. Name the closing hook as a forward action, decision, or pressure, not a static image. State the commercial-reader requirement. Name any signaling requirement that must land indirectly.]
+
+Emotional Arc
+
+[Three to five arrow-linked emotional stages, with beat references where useful.] Ends on [the POV character’s intended next action, decision, or pressure from the closing beat].
+
+• • •
+
+GLOBAL DRAFTING CONTROLS
+
+The chapter is [position in novel] of a [genre and subgenre] written for [market position]. The prose discipline that follows is calibrated to that market. Any tradition naming is orientation only; the drafter is not instructed to imitate named authors at sentence level.
+
+HARD CAPS (binding; a draft breaking any of these is rejected and regenerated before being ranked on literary quality):
+
+1. Characterisation-by-tradecraft — observational construction.
+   Function: The model defaults to compact characterisation through observational phrasing. In this register, characterisation should come from action, choice, pressure, dialogue, and concrete behavior.
+   Prohibition: Zero instances of “the way [person/thing] [verbs],” “the way [it] felt,” “the way [thing] wanted/wants to be [verbed],” “the way [person] [verbs] when/who,” “the way you/one know(s),” sense-perception variants such as “the noise/sound a [person/thing] makes,” and the determiner-and-adjective variant “that [adjective] way [subject] [verbs] before/when [clause]” (“in that last way old dogs go narrow before they go,” “in that quiet way she has of leaving,” etc.). The adjective insertion does not exempt the construction; the prohibition surface covers the shape regardless of determiner. State the conclusion flatly or trust the action.
+
+2. Observational periphrasis — comparison-as-characterisation.
+   Function: This is the substitute the model reaches for when direct observational construction is closed. The function is the same: characterisation through ornamental comparison.
+   Prohibition: Zero instances in narration or interior thought of “as though,” “as if,” “in the manner of,” “like a woman/man/person who,” or equivalent observational framing. The prohibition extends to three near-variants the bare “like a [person] who” form does not cover: (a) the non-person elaborated comparison “like a [noun] that had [past-participle] [object]” (“like a metronome that had taken on apprentices,” “like a chair that had given up”); (b) the action-extended simile “like a [noun] [participle phrase]” or “like [someone/something] [verb-ing] [object/clause]” (“like a hand closing around a thread,” “like someone leaning back on their heels”); (c) the personification-with-backstory “with the [abstract noun] of a [person] [who/whose clause]” (“with the care of a woman whose knees had filed a formal complaint,” “with that flat appraising patience foxes wear when they’re deciding whether you’re worth eating later”). Characters may use natural comparison in dialogue if it sounds like speech.
+
+3. Negation-pivot — reverse definition.
+   Function: The model often defines a thing by first saying what it is not. This creates a literary-corrective cadence. In the target register, definitions should move forward.
+   Prohibition: Zero instances in narration or interior thought of “not X but Y,” “not quite X and not quite Y,” “not the X but the Y,” “Not the X. The Y,” “Not the X; the Y,” or “Not [adjective]. [Same subject] [different adjective].” Characters may use ordinary negation in dialogue.
+
+4. Em dashes — overused interruption signal.
+   Function: Em dashes carry pause, parenthesis, and interruption, but the model overuses them at detectable density.
+   Prohibition: Target 0–4 em dashes for chapters under 3,000 words and 0–6 for chapters over 3,000 words unless the user provides a stricter calibrated number. No em dash in the first paragraph. Never two em-dash sentences in a row. Prefer comma, full stop, parentheses, or sentence break.
+
+5. Emotion naming — displaced feeling.
+   Function: The model often turns emotion into narrator metaphor. In both first person and close third, interiority should stay embodied and specific: feeling is enacted in thought, not named. Plain naming of a feeling belongs to speech, where a character admits it to another.
+   Prohibition: Zero narration such as “she felt a wave of grief,” “a flush of anger,” “with a sense of dread,” or similar displaced feeling-metaphor. Do not name a feeling plainly in narration or interior thought either (“I was angry,” “I was afraid” as bare interior statement); enact it through body, action, object, or gesture. Plain self-naming is permitted only in spoken dialogue, where a character admits the feeling to another — a confession, an apology, or a similar direct admission — and the line reads as natural speech. Do not use meta-naming such as “I named the feeling” or “I named the thing in my chest.”
+
+6. Forward-motion chapter close — no terminal image as ending.
+   Function: The final sentence should pull the reader forward. The model defaults to static objects and abstract closing images.
+   Prohibition: Do not end on a static object, silence, darkness, weather, an unopened letter, a closed trunk, a sealed packet, or an abstraction as subject. End on a character’s action, decision, pressure, or next movement.
+
+7. Scene-beat grounding — every SCENE beat anchored.
+   Function: SCENE beats need the built world, not generic staging. The reader should feel this chapter’s specific objects, weather, body pressure, sounds, routines, and history.
+   Prohibition/Requirement: Every SCENE beat must include at least one concrete physical detail specific to the scene and at least one callback to the POV character’s formed self: habit, training, wound, role, prior event, or established relationship. Avoid generic “she remembered her training” phrasing; name the kind of memory or habit.
+
+8. Aphoristic standalone — abstract-subject verdict.
+   Function: The model uses short abstract verdicts as literary punctuation.
+   Prohibition: Zero sentences under 10 words whose subject is an abstraction such as morning, silence, air, hour, weather, quiet, room, house, year, dark, wind, rain, cold, dusk, dawn, world, and whose verb evaluates or negates. Do not use abstract-subject verdicts at paragraph ends.
+
+9. Explanatory backfill — action plus justification.
+   Function: The model states an action and then explains the psychology in a “because/since I had…” tail.
+   Prohibition: Zero clauses where an action is justified by “because/since I/he/she had known/thought/realized/seen/felt/understood/suspected/recognized/guessed/sensed.” Put the knowledge before the action or let the action stand.
+
+10. Verdict constructions — compact narrator judgment.
+    Function: The model compresses judgment into elegant but fingerprinted verdict phrasing.
+    Prohibition: Zero narration or interior thought using “[noun] too [adjective] for [noun],” “too [adjective] to [verb]” as narrator verdict, or “a specific/particular/certain/peculiar/distinct kind of [bare adjective].” Characters may use such phrasing in dialogue if natural.
+
+11. Triple-noun-phrase escalation — evaluative rule-of-three.
+    Function: Three comma-separated evaluative phrases create a recognizable AI cadence.
+    Prohibition: Zero instances of three or more comma-separated noun phrases where two or more carry evaluative modifiers. This applies at sentence opening and mid-sentence appositive position. Use one item, flat listing, or separate sentences.
+
+12. Paragraph anchor requirement — no observational drift.
+    Function: Paragraphs can drift into pure observation, reflection, or retrospective explanation.
+    Prohibition/Requirement: Any paragraph of three or more sentences inside a SCENE beat must include at least one clause with a named character as subject doing a concrete action or making a clear decision. Do not use hand actions as the default anchor. Hand-action anchors must not appear in more than two consecutive paragraphs.
+
+13. Echoed-clipped dialogue — no parallel-rhythm exchanges.
+    Function: The model uses repeated clipped dialogue to imply subtext.
+    Prohibition: Zero exchanges where speaker B repeats speaker A’s last 2+ words, or where two consecutive A–B exchanges form repeat-and-extend rhythm. One single-word echo per scene is permitted.
+
+14. Negation-as-action — refusal as structure.
+    Function: The model turns not-doing into the action of a sentence or paragraph.
+    Prohibition: Avoid building sentences or paragraphs around what the POV character does not do: “I did not look,” “He did not turn,” “She did not answer” as the main architecture. State the chosen action instead. Ordinary negation is permitted when needed for meaning.
+
+15. Staccato density — short-sentence clustering.
+    Function: Clusters of very short narrative sentences create a commercial-fiction AI tell when overused.
+    Prohibition: Short narrative-prose sentences of five words or fewer are limited to one run per 500 words. Never three or more in a row. Never let short-sentence clusters dominate a paragraph. Dialogue is exempt.
+
+16. Polysyndetic run-on — repeated “and” chaining.
+    Function: The model imitates Hemingway-like breathless accumulation by chaining clauses with repeated “and.”
+    Prohibition: Zero narration sentences joining four or more clauses with coordinating “and.” Dialogue is exempt if character voice requires it.
+
+17. Aphoristic generalisation cluster — universal-claim grouping.
+    Function: A single aphorism may pass as voice; clustered universal claims read as AI-generated commentary. One template within this family is fingerprinted strongly enough to be prohibited at single-instance.
+    Prohibition: Zero instances at any density of “[bare-noun] people [universal verb]” (“people who have decided fog is a personal affront,” “people who do not call back,” etc.) — the bare-noun-people template is the most distinctly LLM-feeling of the aphoristic-generalisation surfaces and is prohibited as a single instance, not only as a cluster. For the remaining templates, the cluster threshold holds: no two aphoristic generalisations within a three-sentence window. Avoid templates such as “It looks/feels/seems like X” paired with another such sentence, “the alternative is/was/to,” and “Every [noun] is/has/wants/needs [Y].”
+
+18. Tautological loop — subject doing what subjects do.
+    Function: The model creates literary-sounding loops whose object merely restates the subject’s category. The fingerprint persists whether the restating noun is a plural of the subject or the same noun.
+    Prohibition: Zero instances of “[Subject] did/does the thing [subjects] do,” including the plural variants “her face did the thing faces do” or “wolves did the thing wolves do,” and the same-noun variant “[subject] [verb] the thing [same-subject-noun] [verb]s when [clause]” (“watched the dark do the thing dark does when you are listening for something in it,” “the silence did the thing silence does when no one is speaking,” “the cold did the thing cold does at four in the morning”). The prohibition surface covers both the plural-of-subject and the repeated-singular-noun forms.
+
+19. Anaphoric escalation — repeated sentence openers.
+    Function: Three-fold repeated openers create a rhetorical-anaphora fingerprint.
+    Prohibition: Zero instances of three or more sentences within a five-sentence window sharing the same opening one or two words. Two-fold parallel structure is permitted. Three-fold escalation is prohibited.
+
+20. Narration mode — untethered exposition.
+    Function: Information the chapter must convey — stakes, status, backstory, a relationship, a person’s or object’s significance — defaults to being stated as narrator summary, the prose stepping out of the scene to brief the reader. Distributed across a chapter this free-standing exposition reads as even and self-interpreting. Such information should instead be carried by what happens, is seen, is handled, or is said, or by interiority tethered to a concrete action, object, or perception in the present beat.
+    Prohibition/Requirement: Within each SCENE beat, free-standing expository or interpretive narration that briefs the reader on significance, worth, status, history, or how two parties stand to each other must not outweigh the staged material that carries it; the beat must render more than it summarises. This does not restrict reflection, calculation, or judgment that is tethered to a concrete action, object, or perception in the present beat — tethered interiority is permitted and wanted. The target is floating summary, not thought.
+
+Required throughout
+
+[Build this section from the chapter’s POV and genre.]
+
+Include:
+- POV-specific interior posture.
+- The emotional contract for this chapter.
+- Land each major emotional beat through embodied action, body, or behaviour rather than a named feeling; reserve plain emotion-naming for spoken confession or apology to another character.
+- At least one moment of wit, dryness, judgment, or character-specific pressure release if the POV supports it.
+- Concrete scene grounding in every SCENE beat.
+- Dialogue that does dramatic work: each exchange should move power, information, intimacy, conflict, or concealment.
+- The chapter’s specific genre obligation: romance beat, danger beat, reveal beat, investigation beat, competence beat, intimacy beat, horror beat, etc.
+- The closing beat must carry forward motion.
+
+Avoid throughout
+
+Include:
+- no source-author imitation;
+- no literary-critical register;
+- no polished sample prose in the outline;
+- no generic summary where the source outline asks for scene;
+- no overexplaining a character’s motive after the action;
+- no abstract paragraph-ending verdicts;
+- no repeated paragraph openers;
+- no repeated hand imagery as default grounding;
+- no chapter-level bloat from restating every cap at every beat;
+- no new plot inventions unless needed for transition.
+
+Mechanical register
+
+Use these operational targets unless a source-calibrated register is supplied:
+- Sentence rhythm: varied but controlled; most sentences 8–28 words; occasional longer sentences allowed for pressure or action clarity.
+- Average sentence length target: 12–18 words for commercial genre fiction, 14–22 for more literary historical fiction.
+- Long sentences over 40 words: rare; use only for controlled interior pressure or action complexity.
+- Paragraphing: vary 1–6 sentences; avoid repeated one-sentence paragraphs.
+- Fragments: permitted sparingly in first-person or high-pressure moments; do not cluster.
+- Em dashes: obey hard cap above.
+- Semicolons and colons: use sparingly; commercial register should prefer full stops and commas.
+- Dialogue: keep exchanges purposeful; avoid exposition dumps.
+- Interior thought: character-specific, not essayistic.
+- Sensory detail: specific to the character’s body, work, place, danger, attraction, or wound.
+- Chapter close: forward pressure, not static image.
+
+• • •
+
+MICROBEATS
+
+Convert the existing scene texture sequence into numbered microbeats. If the existing outline already has microbeats, preserve them and normalize.
+
+For each beat use this structure:
+
+[Beat number]. [Beat title] — [SCENE / MOMENT / COMPRESSED]
+Dramatic action: [what happens on the page]
+POV movement: [what changes inside the POV character]
+Required details: [objects, physical actions, sensory facts, continuity anchors]
+Dialogue guidance: [spoken on page / reported / silent / approximate line count]
+Ending change: [what is different by the end of the beat]
+
+SCENE = write to natural depth.
+MOMENT = a handful of sentences.
+COMPRESSED = 1–3 sentences or brief summary.
+
+When a source microbeat is phrased as information to establish, convey, or explain — for example “establish that X matters,” “the reader learns Y,” “convey the history of Z,” “show that A and B are partners” — do not pass it into the beat as something to be narrated. Convert it into a staged equivalent: in Dramatic action and Required details, name the action, object, gesture, spoken line, or present-beat perception through which the information surfaces. Hand the drafter a thing that happens, not a fact to summarise. The information is still required; only its delivery changes.
+
+ANALYTICAL BEATS RULE. When the chapter itself is analytical — investigation, deduction, mapping, correspondence, a character working out what is true — the conversion above is not optional and applies to every such beat. Pin each inference to a physical operation on a named object: a pencil line drawn on a plat, a letter unfolded, a figure written and underlined, a loaf turned out of a crock. The conclusion should arrive in the same sentence as the hands. Free-standing deduction — narration that reasons for more than two sentences without touching an object — is the strongest machine signal measured in this project's corpus (14 July 2026: inside one chapter, object-pinned analysis measured fourteen points colder than free-standing deduction). Also convert bare question-and-answer exchanges: interleave physical business between the lines rather than letting the exchange run as naked call and response.
+
+Do not draft the prose.
+Do not create sample dialogue unless the original outline gives exact required lines.
+Do not overexpand.
+
+• • •
+
+DIALOGUE SUMMARY
+
+Organize the existing dialogue opportunities.
+
+For each dialogue beat include:
+- speakers
+- approximate length if given
+- surface topic
+- hidden conflict or subtext
+- what changes because of the exchange
+- whether the dialogue should be spoken on page, reported, or mostly silent
+
+Preserve exact dialogue lines from the original outline if supplied.
+
+• • •
+
+SCENE BEAT DISTRIBUTION
+
+Give a brief distribution of the drafted chapter’s target word count across the major beats.
+
+Use approximate ranges. Do not over-engineer.
+
+Format:
+- Beat(s) [x–y]: [estimated word count] — [reason]
+- Beat(s) [x–y]: [estimated word count] — [reason]
+
+Make sure the distribution matches the original chapter’s emphasis.
+
+• • •
+
+CONTINUITY CHECKLIST
+
+A. POV and register
+- POV, tense, and interior posture are correct.
+- The chapter’s voice posture is named as register, not author imitation.
+- The chapter does not ask the drafter to imitate source prose.
+
+B. Plot and scene continuity
+- Required events from the existing outline are preserved.
+- No new plot events were added unless needed for a transition.
+- The chapter ends on the original hook or a faithful forward-motion version of it.
+
+C. Character continuity
+- Wants and hidings are preserved.
+- Relationship movement is preserved.
+- Power shifts, secrets, wounds, and obligations are preserved.
+
+D. v21 control compliance
+- GLOBAL DRAFTING CONTROLS are present.
+- All twenty hard caps are present in compact Function/Prohibition form.
+- The v21 additions are present: staccato density, polysyndetic run-on, aphoristic generalisation cluster, tautological loop, and anaphoric escalation.
+- The narration-mode cap (Cap 20) is present: within a SCENE beat, untethered exposition does not outweigh the staged material that carries it.
+- Cap 1 variants (including the determiner-and-adjective “that [adjective] way” form), Cap 2 extended-simile and personification-with-backstory variants, Cap 3 bridge variants, Cap 10 kind-of verdict variant, Cap 11 mid-sentence appositive variant, Cap 17 single-instance bare-noun-people prohibition, and Cap 18 same-noun tautological-loop variant are included.
+- No raw source passages are imported.
+- No Voice and Scene Reference section is included.
+- No worked prose examples are added.
+- No visible self-test is included.
+
+E. Drafting readiness
+- Microbeats are clear enough to draft from.
+- Dialogue summary is clear.
+- Scene distribution fits the target word count.
+- The packet is self-contained.
+
+END OUTLINE
+
+Now convert the following existing chapter outline into the above format.
+

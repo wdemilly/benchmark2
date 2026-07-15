@@ -1,0 +1,22 @@
+STEP 2 — DRAFTING PASS (OUTLINE → CHAPTER)
+v2 (formerly Prompt 0)
+
+PIPELINE POSITION
+This is the drafting pass. Step 3 (the hardening pass) runs after it. This
+prompt only generates the draft. Draft the whole chapter with commitment; do not
+hedge or self-edit for surface phrasing — Step 3 handles cleanup.
+
+TASK
+Write the full chapter from the outline below. The outline is the single source
+of truth. Follow its instructions, beats, and order exactly. Conform to the
+outline's GLOBAL DRAFTING CONTROLS section, which is binding: the register
+targets, the hard caps, and the per-beat requirements all live there. Draft from
+the outline; do not restate or summarize it.
+
+OUTPUT
+Return the full chapter as plain text, with normal paragraph breaks. No title, no
+headers, no commentary, no notes, no meta-text of any kind. Begin with the
+chapter prose and end with the chapter prose.
+
+OUTLINE
+[PASTE OUTLINE HERE]

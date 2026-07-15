@@ -27,10 +27,12 @@ Originality is used only for Walter's manual random audits, outside this
 script.
 
 The outline can arrive two ways. Load the whole-book outline file (a real
-.docx or a text file wearing the extension) and pick a chapter: the ENTIRE
-book goes to Step 1 with that chapter named as the one to convert, which is
-the recipe Walter's incognito tests validated (the drafter saw the full
-book, not an excerpt). Or paste a single chapter outline directly.
+.docx or a text file wearing the extension) and pick a chapter: ONLY that
+chapter goes to Step 1, with the Reference System from the front matter and
+the Master Notes from the back riding along, because the chapter's beats
+are written in those codes. If the file's chapter headings cannot be
+recognized, the whole file goes with the chapter named instead. Or paste a
+single chapter outline directly.
 
 Run, from the folder containing this file and the three Step files:
 
@@ -38,6 +40,12 @@ Run, from the folder containing this file and the three Step files:
 
 Requires: streamlit, anthropic. API key from the ANTHROPIC_API_KEY
 environment variable or Streamlit secrets.
+
+The model is called plainly — client.messages.create with model,
+max_tokens, and the message, matching the proven simpleapp_v22 calls. No
+system prompt (the three Step files are the whole instruction), default
+temperature, no effort or thinking parameters, no streaming. Earlier
+builds added those and hung on the deployed library; this one does not.
 """
 
 import json
@@ -66,7 +74,6 @@ STEP_FILES = {
 }
 
 MODEL = "claude-opus-4-8"
-EFFORT = "high"                 # part of the validated recipe; do not lower
 MAX_TOKENS = {1: 20000, 2: 30000, 3: 30000}
 PRICE_IN = 5.00 / 1_000_000     # dollars per input token, Opus 4.8 standard
 PRICE_OUT = 25.00 / 1_000_000   # dollars per output token
@@ -221,48 +228,25 @@ def load_api_key():
     return "", "none"
 
 def call_model(client, prompt_text, max_tokens, status_slot):
-    """One non-streaming call at the pinned model and effort. Returns
-    (text, input_tokens, output_tokens). Streaming was removed because on
-    Streamlit Community Cloud the websocket is cut during long quiet calls,
-    which left the spinner turning forever over a dead request. A plain
-    request either returns or raises; any failure is shown on the page.
-    Falls back through effort forms if the installed SDK is older."""
-    base = dict(
+    """One plain call, shaped exactly like the proven simpleapp_v22 calls:
+    client.messages.create with model, max_tokens, and the message, and
+    nothing else. No effort setting, no thinking block, no timeout, no
+    streaming. Those additions were what hung the app on the deployed
+    library; the working script never used any of them. The three Step
+    files carry the entire instruction, so there is no system prompt, and
+    temperature is left at the API default."""
+    status_slot.write("waiting for the model...")
+    resp = client.messages.create(
         model=MODEL,
         max_tokens=max_tokens,
         messages=[{"role": "user", "content": prompt_text}],
     )
-    attempts = [
-        dict(base, thinking={"type": "adaptive"},
-             output_config={"effort": EFFORT}),
-        dict(base, extra_body={"thinking": {"type": "adaptive"},
-                               "output_config": {"effort": EFFORT}}),
-        base,
-    ]
-    last_error = None
-    for i, kwargs in enumerate(attempts):
-        try:
-            status_slot.write("waiting for the model...")
-            msg = client.messages.create(timeout=1800, **kwargs)
-            if i == 2:
-                st.warning(
-                    "The installed anthropic library rejected the effort "
-                    "setting. The call ran at the API default. Upgrade the "
-                    "library with: pip install --upgrade anthropic")
-            text = "".join(
-                block.text for block in msg.content
-                if getattr(block, "type", None) == "text")
-            usage = msg.usage
-            return (text,
-                    getattr(usage, "input_tokens", 0),
-                    getattr(usage, "output_tokens", 0))
-        except TypeError as e:
-            last_error = e
-            continue
-        except anthropic.BadRequestError as e:
-            last_error = e
-            continue
-    raise RuntimeError(f"The model call failed. Last error: {last_error}")
+    text = "\n".join(b.text for b in resp.content
+                     if getattr(b, "text", None))
+    usage = resp.usage
+    return (text,
+            getattr(usage, "input_tokens", 0),
+            getattr(usage, "output_tokens", 0))
 
 # ----------------------------------------------------------- prompt plumbing
 
@@ -354,8 +338,9 @@ def main():
         else:
             key = clean_api_key(st.text_input("Anthropic API key",
                                               type="password"))
-        st.write(f"Model: `{MODEL}` at effort `{EFFORT}` (pinned; part of "
-                 "the validated recipe).")
+        st.write(f"Model: `{MODEL}`, called plainly (no system prompt, "
+                 "default temperature) — the same call shape as the proven "
+                 "simpleapp_v22.")
         threshold = st.number_input(
             "Warm-mode threshold, constructions per 1,000 narration words. "
             "UNCALIBRATED — a guess, installed on instruction. Lower means "
@@ -504,7 +489,7 @@ def main():
         verdict = predictor_verdict(chapter)
         report = {
             "when": datetime.now().isoformat(timespec="seconds"),
-            "model": MODEL, "effort": EFFORT,
+            "model": MODEL,
             "hardening_passes": passes,
             "counter_density_final": round(warm_mode_count(chapter)[1], 2),
             "threshold": threshold,

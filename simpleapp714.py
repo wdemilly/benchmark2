@@ -512,19 +512,34 @@ def main():
         }
         save("report.json", json.dumps(report, indent=1))
 
+        st.session_state["run"] = {
+            "packet": packet, "draft": draft, "chapter": chapter,
+            "log": log, "report": report, "run_dir": str(run_dir),
+        }
+
+    # ---- results, rendered from session state so the download buttons
+    # ---- survive the page rerun Streamlit fires on every click; without
+    # ---- this, downloading one file would erase the other buttons
+    if "run" in st.session_state:
+        r = st.session_state["run"]
+        rep = r["report"]
         st.subheader("Shipped")
-        st.write(f"{report['chapter_words']} words, {passes} hardening "
-                 f"pass(es), {report['minutes']} minutes, about "
-                 f"${report['cost_dollars']:.2f}. Files in `{run_dir}`.")
+        st.write(f"{rep['chapter_words']} words, {rep['hardening_passes']} "
+                 f"hardening pass(es), {rep['minutes']} minutes, about "
+                 f"${rep['cost_dollars']:.2f}. Files in `{r['run_dir']}`.")
         st.write("Ship-or-rework verdict from text alone: **UNKNOWN** — no "
                  "honest predictor exists yet (ledger Entry 11). Audit "
                  "chapters manually at your own schedule.")
-        st.download_button("Download the chapter", chapter,
-                           file_name="chapter_FINAL.txt")
+        st.download_button("Download the Step 1 packet", r["packet"],
+                           file_name="1_packet.txt", key="dl_packet")
+        st.download_button("Download the Step 2 draft", r["draft"],
+                           file_name="2_draft.txt", key="dl_draft")
+        st.download_button("Download the finished chapter", r["chapter"],
+                           file_name="chapter_FINAL.txt", key="dl_chapter")
         with st.expander("The chapter"):
-            st.text(chapter)
+            st.text(r["chapter"])
         with st.expander("Change log"):
-            st.text(log)
+            st.text(r["log"])
 
 if __name__ == "__main__":
     main()

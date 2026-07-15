@@ -41,11 +41,13 @@ Run, from the folder containing this file and the three Step files:
 Requires: streamlit, anthropic. API key from the ANTHROPIC_API_KEY
 environment variable or Streamlit secrets.
 
-The model is called plainly — client.messages.create with model,
-max_tokens, and the message, matching the proven simpleapp_v22 calls. No
-system prompt (the three Step files are the whole instruction), default
-temperature, no effort or thinking parameters, no streaming. Earlier
-builds added those and hung on the deployed library; this one does not.
+The model is called by streaming — client.messages.stream with model,
+max_tokens, and the message, matching the proven simpleapp_v22 calls in
+every other respect. No system prompt (the three Step files are the whole
+instruction), default temperature, no effort or thinking parameters.
+Streaming is required on the deployed library: a non-streaming call whose
+max_tokens is large enough to run past the client's safety ceiling raises
+ValueError before it is sent, so the draft and harden calls must stream.
 """
 
 import json
@@ -228,22 +230,31 @@ def load_api_key():
     return "", "none"
 
 def call_model(client, prompt_text, max_tokens, status_slot):
-    """One plain call, shaped exactly like the proven simpleapp_v22 calls:
-    client.messages.create with model, max_tokens, and the message, and
-    nothing else. No effort setting, no thinking block, no timeout, no
-    streaming. Those additions were what hung the app on the deployed
-    library; the working script never used any of them. The three Step
-    files carry the entire instruction, so there is no system prompt, and
-    temperature is left at the API default."""
+    """One streamed call, otherwise shaped like the proven simpleapp_v22
+    calls: model, max_tokens, and the message, with no effort setting, no
+    thinking block, no system prompt, and default temperature. Streaming
+    is required, not optional: on the deployed library a non-streaming
+    request whose max_tokens is large enough to run past the client's
+    safety ceiling raises ValueError from _calculate_nonstreaming_timeout
+    before the call is even sent. Streaming lifts that ceiling and keeps
+    the connection alive with a steady trickle of tokens. The result is
+    accumulated and returned identically to a plain call."""
     status_slot.write("waiting for the model...")
-    resp = client.messages.create(
+    pieces = []
+    with client.messages.stream(
         model=MODEL,
         max_tokens=max_tokens,
         messages=[{"role": "user", "content": prompt_text}],
-    )
-    text = "\n".join(b.text for b in resp.content
+    ) as stream:
+        for chunk in stream.text_stream:
+            pieces.append(chunk)
+            if len(pieces) % 50 == 0:
+                status_slot.write(
+                    f"writing... {len(''.join(pieces).split())} words so far")
+        final = stream.get_final_message()
+    text = "\n".join(b.text for b in final.content
                      if getattr(b, "text", None))
-    usage = resp.usage
+    usage = final.usage
     return (text,
             getattr(usage, "input_tokens", 0),
             getattr(usage, "output_tokens", 0))
@@ -338,8 +349,8 @@ def main():
         else:
             key = clean_api_key(st.text_input("Anthropic API key",
                                               type="password"))
-        st.write(f"Model: `{MODEL}`, called plainly (no system prompt, "
-                 "default temperature) — the same call shape as the proven "
+        st.write(f"Model: `{MODEL}`, streamed with no system prompt and "
+                 "default temperature — the same call shape as the proven "
                  "simpleapp_v22.")
         threshold = st.number_input(
             "Warm-mode threshold, constructions per 1,000 narration words. "

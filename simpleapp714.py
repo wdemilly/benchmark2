@@ -5,7 +5,7 @@ simpleapp714 — the three-window chapter pipeline
 Replaces the multi-draft harness of simpleapp_v22. One draft, three model
 calls, no Originality anywhere in the loop.
 
-    Window 1   Step_1_Normalize_Outline_v4.txt   outline -> drafting packet
+    Window 1   Step_1_Normalize_Outline_v5.txt   outline -> drafting packet
     Window 2   Step_2_Draft_v2.txt               packet  -> raw chapter
     Window 3   Step_3_Harden_v1.txt              draft   -> hardened chapter
 
@@ -70,7 +70,7 @@ except ImportError:
 HERE = Path(__file__).resolve().parent
 
 STEP_FILES = {
-    1: "Step_1_Normalize_Outline_v4.txt",
+    1: "Step_1_Normalize_Outline_v5.txt",
     2: "Step_2_Draft_v2.txt",
     3: "Step_3_Harden_v1.txt",
 }

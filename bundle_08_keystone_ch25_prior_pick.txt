@@ -1,0 +1,368 @@
+STEP 2A — ASSESS THREE DRAFTS AND SELECT ONE
+(v1 — 2026-07-18. New step. Purpose: the same chapter is drafted three times by Step 2; this step reads all three as literature and selects the one to keep. This is a craft judgment, not a measurement. Derived from a close comparison of three Keystone chapter 2 drafts whose quality differences were large and identifiable; the criteria below are the differences that mattered there. To be run in a fresh incognito window with no other context. Amended 21 July 2026 on Walter's instruction: criteria 3 and 4 are swapped, so dialogue under load is now judged third and information strategy fourth. Reason: on Keystone chapter 10b the old order selected the draft that scored 84 over the draft that scored 91, and the assessment itself named the cause — it ranked the winning draft best on dialogue and then said the criterion order broke the tie against it. Under the new order it selects the 91.)
+
+You are a fiction editor reading three drafts of the same chapter. All three were written from the same outline. Your job is to judge them as prose fiction — as an acquiring editor would — and select the strongest. You are not checking them against the outline for coverage; assume all three cover it.
+
+Read all three drafts completely before writing anything.
+
+Then assess each draft against these criteria, in this order. For every judgment you make, quote the exact passage it rests on. A judgment without a quotation does not count.
+
+1. INTERIORITY. When the chapter goes inside the point-of-view character, is the interior material pinned to specific remembered places, objects, and people, or does it run to summary and abstraction? A memory with a name and a physical detail outranks a reflection that tells the reader what to conclude. Quote the best-pinned interior moment and the most abstract one in each draft.
+
+2. THEME HANDLING. Does any character state the chapter's theme out loud? A speech that announces the meaning of the story is a defect, however well written. Behavior that carries the meaning without naming it is the standard. Quote the most thesis-like line in each draft and the best moment where meaning is carried by action alone.
+
+3. DIALOGUE UNDER LOAD. Find the exchange that carries the most story weight in each draft. Does the dialogue do more than one job at a time — advance the plot, reveal the speaker, and obstruct the other character in the same lines? Quote the single best line of dialogue in each draft and say what jobs it is doing.
+
+4. INFORMATION STRATEGY. What does each draft withhold, and how? The strongest choice lets the reader catch something a character misses, staged in plain sight without narration pointing at it. The weakest explains its own secrets. Identify each draft's central withheld fact and quote how it is planted.
+
+5. MOTIF DISCIPLINE. Does a physical gesture or object recur with accumulated meaning — the same action returning later as metaphor, earned rather than installed? Quote the recurrence if it exists.
+
+6. PRECISION OF THE PHYSICAL WORLD. Are measurements, procedures, and objects exact, consistent, and professionally credible throughout? Note any place where the physical facts blur, contradict, or go generic.
+
+7. LINE FAULTS. Note clumsy constructions, repeated sentence shapes, tense wobbles, and dead phrases, with quotations. Weigh these last; a draft with the best architecture and a few rough lines beats a clean draft with weak architecture.
+
+Then write the verdict:
+
+- Rank the three drafts, first to third.
+- For the winner, state in one paragraph why it wins, resting the paragraph on the quoted evidence above.
+- For each loser, state in one or two sentences the decisive weakness.
+- If two drafts are close, say so and say what would break the tie.
+- Name the winner on its own final line, exactly: SELECTED: DRAFT [number].
+
+Do not summarize the plot. Do not suggest revisions. Do not comment on the outline. Judge what is on the page.
+
+
+================================================================
+THREE DRAFTS TO ASSESS
+================================================================
+
+
+----- DRAFT 1 -----
+
+The light came in flat and cold across Sabra Teague's yard, and Verena reached the kitchen a full hour before any of the others. She had her father's plumb-line in her coat pocket. She had carried it every day this last month, since the morning the town said her name aloud in the street and made it a charge.
+
+Sabra was already at the long table with her sleeves shoved up past the elbow and flour on both forearms. A crock of coffee stood cooling at the near end. Beside it were the white cups and the good plates she set out for paying lodgers, and a basket of the morning's bread under a cloth.
+
+"You're early," Sabra said.
+
+"There's room to make," Verena said. "And I wanted it done before they got here."
+
+For a year she had arranged rooms so that other people would sit easy in them. That was done with. She took hold of the near end of the long table and looked down its length, working out where the light fell and where a man could stand to see, and she began to set it for use instead of comfort.
+
+They cleared it together. Sabra carried the plates and the sugar bowl and the bread down to the dresser, and Verena drew the bench back from the wall and stood two more chairs at the head. Then she unrolled the sacking from the length of falsework timber she had brought and laid the cut member down the centre of the boards, square to the grain. Beside it she set the sound piece Emory had sent over, its end splintered raw where it had been broken across by main strength. The cut face lay clean and parted next to that raw end, sawn most of the way through and left thin to snap once the weight came onto it.
+
+Sabra brought the coffee back and set a cup at each place, working her way around the timber without being asked to. She stopped at the head and put her floured palm flat on the board beside the wood.
+
+"I fed that man at this table," she said. "Sat Tancred down right where you're standing and passed him the bread with my own hand, and thanked him for the trade. This table's fed half the men who turned on you in that street." She wiped her hands slow on her apron. "It can hold the thing that turns them back. I've buried two husbands and outlasted a bank failure. One crooked engineer isn't the article that finishes me. Use my table and use my house."
+
+"I mean to," Verena said. "Sit here, at the head, where they'll look when they come in. I'll put Halloway to your right, so the notes lie in the light."
+
+She squared the cut member true to the edge of the boards and laid her father's plumb-line down beside it, bob and string coiled, out where every hand at the table would come to rest near it.
+
+Halloway arrived first of them, with her bag in one hand and a leather folder held flat against her chest. Emory came in slow at her back, favouring the near leg, and let himself down into the chair at the head with both hands on the arms. Tavish held the door for Merritt, then stood about with nothing to do until Verena pointed him at the lamp and the slate on the dresser.
+
+"This leg's good for sitting and judging these days," Emory said, settling the bad one out straight under the table. "You'll get a full measure of both from me before we're through."
+
+"I'll take the judging," Verena said. "Turn it over when you've got your breath. Tell them what your eye tells you, plain as you'd tell a green apprentice."
+
+Halloway opened the folder and laid three written sheets on the table, each one dated across the top in her own square hand.
+
+"Four men hurt on that falsework since July," she said. "The Combe boy went first, in the second week. Then Ridley off the same staging in August. Then the two who came down together when the north bay let go. I set every one of those breaks myself." She turned the top sheet so it faced up the table. "The same break in all four. The right leg, above the knee, driven inward. A frame that fails by accident doesn't pick the same bone four times over. This one did."
+
+Emory reached across and turned the cut member over on the boards, and he ran his thumb down the sawn face and then along the raw split of the sound piece beside it.
+
+"A saw started this," he said. "Set to it clean and stopped short, so the frame would stand while they raised it and let go once the men and their load were up on it. You leave just this much and the wood holds for the raising and no longer. A green hand couldn't judge that cut. It wants a joiner who knew to a hair what it would do, and when."
+
+For a month the timber had gone wherever Verena went, wrapped in its sacking under her cot, and she had let no other hand close on it. She left it with Emory now and lowered herself into the chair across from him.
+
+"Tavish," she said. "Take the slate to the end there. Every name the doctor gives you, and the date beside each. Write it large enough to read from the door."
+
+Tavish wet the pencil against his lip and began to copy the dates off Halloway's sheets, murmuring each one under his breath as he set it down. He had drawn the lamp in close at his elbow, so the doctor's figures showed clear on the slate. Merritt drew a second sound length out from under his arm and laid it in with the others, and the wood came down onto the boards with a flat knock that carried in the small room. He set his own written statement beside it, folded once, and left it there in the middle where it could be reached.
+
+Verena stood the slate up on its end where the whole table could see it and drew a line straight down the middle with the chalk. On the near side she set down what they held in the room. The timber. Halloway's four names and their four dates. What Merritt was ready to swear. She looked at that short near column a while before she said anything, counting it through twice. She had always taken the measure of a stone before she ever set the chisel to it, and she took the measure of this the same, weighing what it would carry and where it would fail.
+
+"That shows the cut, and it shows the dead and the crippled," she said. "It doesn't show his hand on the order that bought the timber. We can stand in this room dead certain and still walk up to the certifying men with nothing they are bound to so much as read."
+
+Tavish set the cut end and the sound end upright side by side against the slate ledge and looked from the one to the other, and no one had told him to.
+
+"Everything for that whole job came up the road on freight wagons," Merritt said. "And every wagon that rolls into Cordell puts down its load at Whitfield's dock before it goes anywhere. Orlo took it in. Orlo booked it and signed the freight clear."
+
+"Then the paper we haven't got is sitting on Orlo Whitfield's shelf," Verena said.
+
+She wrote the number under the whole of the tally and drew two hard strokes beneath it. Nine. She stood the chalk up in its tray and reached her coat down off the peg.
+
+Whitfield's store had gone cold, the stove let die out in the grate, and Orlo stood behind his counter in his shopkeeper's apron with no trade in the place to keep him at it. He came around the end of the counter when he saw who it was that filled his doorway with the daylight behind them.
+
+"I know why you've come," he said. "When they stood in that street and made your name a filthy thing, I held my tongue. I was afraid of the man. Fear turned me into a coward in front of the whole of Cordell, and the shame of it has sat on me every day since. There it is. I've said it out loud, and you were owed it out loud."
+
+Verena let the words stand in the cold air between them and set both her hands flat on the scarred counter.
+
+"Then open your consignment ledger," she said. "From July forward. Every load Tancred ordered up the road for the falsework and the staging both."
+
+Orlo took the heavy ledgers down off the shelf behind him and lifted the bolt of grey cloth and the tin of cut nails aside to clear the counter for them. He laid the books open to the summer pages and brought up a bundle of bills of lading, tied round with string, out of the drawer beneath the till.
+
+Verena turned the ledger and pushed it back across the counter to him, holding it open with one finger at the page she wanted.
+
+"This load here. The framing timber that came in on the twelfth of August. Who put his name to the receiving line when it came off the wagon?"
+
+Orlo went down through the tied bundle until he came to the right sheet and spread it flat under the grey light from the window. He turned it to face her. The line ruled for the receiving hand was bare.
+
+"It came in short of what the manifest called for, and already sawn to length," he said, and his finger stopped on the empty line. "I marked the shortage in my book that morning and never got a signature back to cover the change. Tancred took the delivery down himself, off my own dock, and stood there and told me to book the whole of it as sound timber, sound-sawn and full count. What he told me to write, I wrote."
+
+"My word won't carry to the men who put their seal on this arch," Verena said. "They've heard what the town decided I am, and they've settled comfortable with it. Yours carries clear. You're the man they buy their flour and their lamp oil and their winter boots from. When you tell them the timber came in cut short and he stood over you and had you book it sound, the town itself has said it, and they'll sit still and hear it."
+
+Orlo looked down at the bare receiving line on the bill a long while, and the cold showed on his breath.
+
+"There's my receiving book," he said at last. "My own hand, every load dated as it came off that dock the whole season through. And the manifest for the twelfth that won't square with what I actually signed in. I can have the both of them up to Sabra's table by morning, and I'll stand behind every figure in them."
+
+"By morning, then," Verena said. "We've nine days to the clause, and the crown of the arch still standing open."
+
+Orlo drew the bill of lading out of the bundle and set it apart on the cleared counter, squared up against the ledger, ready to be carried out in the morning.
+
+By dusk they had climbed up to the works above the gorge, where the arch stood open against a sky gone green in the west and the first hard frost had come down white all along the cut stone. The falsework held the ribs of the span up in their curve. Above the last laid course the crown of it gaped where the keystone had yet to be set.
+
+Verena took her father's plumb-line out from her pocket and let the bob run down the face of the standing course. The weight swung once and steadied, and the string drew true against the stone, standing out from the top joint by a hair and no more. She laid her flat hand on the top course and counted the joints down the line to the springing, then up the far haunch of the arch. Each number she called out loud, so the men gathered on the ground below could hear the tally as she made it.
+
+"Five courses a side yet to the crown," she said. "And the crown stone itself cut square and dressed and waiting under cover in the shed. Nine days between us and the clause."
+
+She turned round on the falsework planking to face them where they stood along the frozen ground with their collars up.
+
+"Two things get done before that ninth day falls, and they get done side by side, both moving at once. Orlo's paper, the doctor's four names, this cut length of timber, the whole of it goes up to the men who certify this arch, and it goes up in the town's own voice. That is the first thing. The stone is the second. We plumb every course as it goes, wet the bed, set the stone, and plumb it once more. Then up both haunches, and we key the crown before the clause comes down on us. Prove out what he did to these men, and finish the span he cut the timber to bring down. Both of them, or the proving earns us nothing in the end but the loss with all our names signed under it."
+
+The count hung there in the cold above the gorge, five and five and the crown to close, and the men below took it in and gave her no argument back.
+
+They came down the cut road while the last of the daylight held, lanterns swinging low and tools up across their shoulders. A man Verena knew from the lower street brought his long mattock over one arm, and two half-grown boys ran the empty barrows down the grade behind him. Others came carrying the block-and-tackle slung between them, with coils of rope hung up over their forearms. Sabra came down last of all of them, set a covered basket on a flat-topped stone at the edge of the light, and started handing round what was still warm from her oven.
+
+Verena set them to their work. She put the two boys on the sand and the water for the mortar and sent the men with the tackle across to the shed to bring out the crown stone on the sledge. Emory could not take a turn on the hoist-rope with his bad leg, so she put the rope into Merritt's hands and stood Emory up at the falsework to call the set true as each course came in.
+
+"Wet the first bed," she said. "We set tonight, while the cold's still holding the frost out of the mortar."
+
+"How far do we push it tonight?" Merritt asked.
+
+"One full course, the whole way round the ring. Then we stand back and look at what we've got and take the next by daylight."
+
+She crossed to the block where the first dressed stone lay squared and marked in chalk for its bed, set her shoulder in under the guide of it as the tackle drew the weight up clear of the frozen ground, and walked it in along the string line toward the men waiting for it on the wall.
+
+
+----- DRAFT 2 -----
+
+Sabra had the crockery off the long table before Verena reached the bottom of the stairs. The cups stood in two towers on the sideboard. The oilcloth lay folded over a chair back, and the boards showed bare and scrubbed pale under the window.
+Verena carried the bundle down and set it on the boards.
+"Push the bench out," Sabra said. "You'll want the whole length of it."
+Verena pushed the bench clear and started on the twine.
+"They'll come at eight."
+"Then my bread comes out at eight." Sabra set a floured knuckle down on the table and left a white print on the wood. "You can lay that where my dinner goes."
+"I can lay it on the floor and save your table."
+"You'll lay it on my table." Sabra pulled the second chair around and set it square. "This house fed the men who went into that gorge. It will hold the thing that put them there."
+Verena folded the sacking back.
+The cut member came out first, four feet of falsework timber gone grey with a year of weather. She laid it down the centre of the boards. Beside it she set the sound piece she had carried up from the salvage pile, and she turned both until the broken ends faced the door. On the sound one the fibres stood up in long splinters where the load had torn it. On the other the face was flat and smooth for two thirds of its depth, and the last third had let go in a short ragged tear.
+She hung her father's plumb-line on the chair back before she sat down, because she had never yet started a working day with her tools still in the trunk.
+Sabra looked at the two ends a while. Then she went to the oven.
+Dr. Halloway came first, with her gloves off before she was through the door. She put a bound notebook on the table and turned it so the spine faced Verena.
+"Dates on the spine," she said. "That one's the spring book."
+"Read me the men."
+Halloway opened it flat and held it down with her forearm. "Six I signed for. Every one of them went down inside the same minute. Shoulder, hip, the back of the skull, all of it the kind you get from a straight fall onto rock." She turned a page. "A frame that sags gives a man time to get his feet under him and step for the abutment. I never treated one of those."
+"You said that a year ago."
+"I said it to a coroner who wanted a word he could write down, and the word he wanted was overload." Halloway put her finger on a line of her own handwriting. "It's still here. I never scratched it out."
+Emory Sault came in with his left arm strapped flat across his chest. He put his right hand on the cut member before he took a chair.
+"That's a saw," he said.
+"Say it plainer for the man who'll be writing it down."
+"Somebody laid a saw into it a good way and left the rest for the load to finish." Emory bent and put his eye close to the flat face. "You can see where he stopped. He stopped because he heard something, or because he'd cut enough. In the dark that's the work of one cigarette."
+Tavish Doorn had come in behind him and stood at the end of the table with his hat crushed in both fists.
+"Tavish. The slate's on the nail by the door. Bring it and the chalk."
+The boy went and got it and held it out and stayed standing.
+"Sit down," Verena said. "You're going to keep the count."
+Merritt came in last and took the place at the foot of the table. He put his hat on the bench beside him and left his crushed hand in his lap and looked at the two timbers for a long moment.
+"Halloway's book agrees with the timber," he said.
+"It does."
+"Then the only piece the two of them want is a man who was standing on it." He raised his eyes to the doctor. "I'll swear to the timing in front of whoever the Territory sends."
+Halloway closed her book. "Say that once more in a month and I'll believe you."
+"You can hold me to it in front of everybody in this room."
+Sabra brought the bread through and set it down at the far end where the boards were still clear, and nobody touched it.
+Verena stood the slate against the crock and chalked three words down the left side. Timber. Doctor. Testimony. Then she wrote the days that were left before the clause fell and drew a line under the figure twice, and under all of it she left a blank the length of her hand.
+"What's the empty one?" Halloway said.
+"The company's own paper. Supply and inspection for the original falsework." Verena tapped the blank with the edge of the chalk. "Who bought the timber, who passed it, who put his name to the passing. Merritt and I went through what the land office keeps in August."
+"And?"
+"It thins out." Merritt turned his shoulder to face the doctor. "It's thorough all the way through the spring, and then in the weeks that matter there's less of it, and what there is doesn't say who inspected. Tancred's interest gets thicker across the same weeks."
+"That's a shape," Halloway said. "It isn't a name."
+"No." Verena set the chalk down on the ledge of the slate. "The freight went through a store in this town. Somebody in Cordell signed a receiving book for it and kept his copy, because a man who pays freight keeps his copy."
+Emory laughed once, and then he stopped laughing.
+"Orlo," he said.
+Sabra put both hands flat on the table. "Orlo Whitfield was ready to sell his stake out from under every one of us three weeks ago."
+"He was," Verena said. She took the plumb-line off the chair back and coiled it into her coat pocket. "Tavish, keep the slate where you can see it. I want that figure in front of me every morning."
+The store had gone cold. Orlo had let the stove die down to nothing and he stood behind his counter in his coat with the ledgers still up on the shelf behind him, and he started talking before Verena had the door shut.
+"I was going to sell," he said. "I want that said out loud in front of the doctor and the widow both, before you ask me for anything. I was afraid. Corliss sat in that chair by the stove and told me what this town was worth in the spring and I believed him, and I was going to sign."
+Verena set her palms on the counter. "Get down your books."
+Orlo stayed where he was. "You don't want to tell me what you think of me first?"
+"I want the receiving book for the spring before the collapse."
+"You'd be entitled to say a good deal."
+"I'd be entitled to a lot of things." She moved a stack of tinned goods off the counter and set it on the barrel beside her, and then a second stack, until the wood was clear from the till to the end. "Say the rest of it to Sabra some evening. The book, Orlo."
+He got the steps and brought down two ledgers and a tin box of loose paper, and he laid them where she had cleared. His hands were shaking enough that the tin rattled on the wood, and he pushed it flat and left it alone.
+"Which load?"
+"The falsework timber. Everything that came in for the centering."
+Orlo turned pages backward with his thumb until he found the spring, and Verena turned the book around to face herself and ran her finger down the column the same as she ran it down a course of stone, slow, feeling for the one that sat wrong.
+"There," she said. "That consignment. Read me what's beside it."
+"Weight, freight paid, the shipper's mark."
+"Who signed for the inspection?"
+Orlo bent over the page. He went along the line and came to the end of it and went back and did it again.
+"Nobody," he said.
+Halloway leaned in over Verena's shoulder. Merritt came around the end of the counter and took the tin box lid off and started laying the loose bills out flat, one beside another, until the whole spring's freight lay side by side down the counter. Every one of them carried a signature in the inspection column. The one that matched the ledger line carried a clean blank, and the blank had never been written on and never been scraped.
+Emory whistled through his teeth. Nobody said anything for a while, and Orlo put one finger on the edge of the blank paper and left it there.
+"They'll hear you," Verena said.
+"They'll hear the man who was going to sell."
+"They'll hear the man who has kept a store on this street since before the bridge was surveyed." She squared the bill with the ledger and put both under his hand. "They hear me as the daughter of the mason they buried the blame with. Corliss saw to that in September and it worked. It goes in front of the certifying man in your hand and your name, or it doesn't go at all."
+Orlo drew the ledger toward himself.
+"There's a duplicate of that sheet," he said. "The freight office takes one and I keep one and the shipper keeps one. Mine's in this box. Theirs will be in a file in Miles City with a date on it that nobody's touched." He looked up. "I can write for it tonight and I can put a man on the coach in the morning. It'll be here before the date on your slate."
+"Write it now," Verena said. "We'll take the coach part ourselves."
+He got out pen and ink and the inkwell was frozen solid, and he swore mildly and carried it to the stove and started building the fire back up with kindling out of the crate.
+By four the light had gone flat and blue over the gorge and the frost had come up out of the stone. Verena climbed the abutment with the plumb-line and set the bob against the standing course and let it hang until it stilled. The line lay true along the face. Her father's set, and her own three courses on top of it, and above her the crown stood open against a sky going green in the west.
+She counted the courses aloud from the springing line up, one call for each, her voice carrying flat across the water, and she finished on the empty air where the key would go.
+Merritt had come up the plank behind her. Emory stood below with his good hand on the falsework, and Sabra and Halloway and Orlo and half a dozen others had come down the road from the town and stopped at the head of the works.
+"Say it so they've all heard it," Merritt said.
+Verena turned on the abutment and put her back to the gorge.
+"Two things and one clock," she said. "The freight sheet comes up from Miles City with the blank where the inspection ought to be, and it goes in front of the certifying man together with that timber, the doctor's spring book, and Merritt Ballard standing up to say what he felt go under him. Orlo puts his name to the paper. That's the first thing."
+"And the arch," Orlo said.
+"The arch is the other." She pointed up at the open crown without looking at it. "You all heard me count. Every course of that is dressed stone laid wet and plumbed, and the key is cut and waiting in the shed, and it does not get set by four people. It gets set by this town or it does not get set, and if it is not standing closed by the date on Sabra's slate, Tancred takes the grant and the reversion and the railhead and there is nothing any court does about it afterward."
+Halloway said, "You'll want lamps."
+"I'll want lamps and I'll want twelve pair of hands at first light, and I'll want the mortar tubs thawed before the hands get here."
+"You'll have mine at first light," Sabra said. "You'll have my kitchen tonight."
+They came down off the road while there was still enough light to see the plank. Verena set them as they came, four to the tubs and two to the shed and the rest onto the hoist line, and when a rancher's boy went to lift Emory's end of the barrow she put her hand on the boy's shoulder and moved him to the other side of it and took Emory's tally book off him instead and gave it to Tavish. Lanterns went up on the falsework, one at the springing and one at the head of the plank, and the light of them ran out flat and yellow over the water.
+She had the first stone of the new course rolled out of the shed and wedged on the sledge, and she put her palm on it and found it dry.
+"Wet it," she said, and went up the plank with the mallet on her shoulder and called the crew up after her.
+
+
+----- DRAFT 3 -----
+
+Verena reached the boarding house before the light had any warmth in it, Merritt a step behind her with the sound timber on his shoulder. She carried her father's plumb-line coiled in her coat pocket and the cut member wrapped in its sacking under one arm. Sabra opened the kitchen door before she could knock.
+
+Sabra had flour to the elbow and a dish towel thrown over her shoulder. She looked at the sacking under Verena's arm and stood aside to let them in.
+
+"Set it on the long table," she said. "I cleared the far end already."
+
+The table ran the width of the room, and the morning came in cold and clean across it through the east window. Verena laid the sacking down and started stacking the breakfast crockery to one side, cups into bowls, close so they would carry in a single trip. Sabra took the stack off her hands and set it on the dresser.
+
+"You didn't have to feed the whole street first," Verena said.
+
+"I fed them so they'll work the better for it, and because I wanted my kitchen to myself the last hour it's going to be mine." Sabra came back and put four cups around the cleared boards. "After today it's a table for your business, and my bread can shift for it."
+
+Verena folded back the sacking and laid the cut member down the center of the boards. Beside it she set the sound piece Merritt had brought, its broken end splintered and pale. The two ran side by side down the table, the parted face of the one clean and square, the torn face of the other gone ragged where the grain had let go. She turned the cut so the clean face caught the window light and left it there.
+
+She read the room for its working. The hearth end could keep its chairs. The far end was hers now, and she meant the timber to lie where every eye at the table would fall on the clean cut before a word was said. She took her father's chisel from her coat and set it on the boards beside the cut, a working tool laid on a working table.
+
+Sabra set the fifth cup by Verena's place and put the crock of coffee in the middle where the platter used to stand.
+
+"There," she said. "A year I fed a table that lied to me, yours and everybody's. I've stopped minding it. This is where we work now, and you'll tell me who sits where."
+
+Verena laid her hand flat on the boards and looked down their length. "Halloway at the head, where the light falls best for her notes. Emory across from the cut. Tavish by the door, he'll be up and down all morning."
+
+For a year she had arranged rooms so the men in them would stay comfortable and never think to look at her twice. She set this one to be worked in.
+
+They came within the quarter hour, stamping the cold off their boots at the step. Halloway first, a leather case under her arm. Emory behind her, moving square and slow, his right arm held close to his side. Tavish last, a long-boned boy with nothing to carry and nowhere to settle his hands.
+
+Verena sent Tavish to fetch Sabra's slate and a stub of chalk, then to hold the lamp close over the table. He took to the work at once.
+
+Halloway opened her case and laid a sheaf of notes at the head of the table, each page dated in a small upright hand. "It's the first time I've said any of this in a room instead of writing it down," she said. "The injuries come from falling timber. I set it down for each man who was hurt, the day I saw him, and I will swear to it wherever it needs swearing."
+
+"Could a man come by hurts like that another way," Verena said. "An honest slip. Bad footing. A load shifting on its own."
+
+"He could not." Halloway squared the top page with one finger. "I've mended enough honest accidents to know the shape of them. These are the same hurt, the same hour, under the same span. One thing came down on all of them at once."
+
+Emory reached across with his good arm and turned the cut member so the parted face came up under the lamp. He ran his thumb along it once. "That's a saw," he said. "Somebody stood under the falsework and took this most of the way through, then left the load to finish it. You can read the kerf plain. No storm did that. No rot did that."
+
+"How long would it stand, cut like this," Merritt said.
+
+"Long enough for the hand that cut it to be a mile off." Emory set the timber down on the boards, and the knock of it carried in the quiet room. "A day. Maybe two. Until the weight found the weak place and went hunting for the ground."
+
+"Well," Sabra said from the stove. "That's the most anyone's got out at this table in a month without me feeding them twice for it."
+
+Verena had been holding the sound piece against her chest without marking that she did. She set it down in front of Emory and lifted her hands off it. "Then it's yours to speak on. You turn it over, and you say the word saw to the certifying man, in your own trade and your own mouth."
+
+Emory looked at the cut a moment and gave one nod. "I'll say it, and I'll let him put a saw in my hand and try to make that break any other way."
+
+For a year she had kept every proof close, in a floor box, under a board, on her own person. She let this one go across the table and left it in the room's keeping.
+
+Tavish held the chalk over the slate, and Verena told him what to set down. The cut timber, at the top. Under it, Halloway's dated notes. Under that, Merritt's word as a man who had been there. She named each and the boy wrote it.
+
+She set thumb and finger to the empty slate below the writing and measured the space before she spoke, the reckoning she would make of a gap in a course before she filled it.
+
+"And nothing of the company's own," she said. "We have what the timber says, and what the doctor saw, and what Merritt can swear. We don't have a single page with Tancred's hand on it. Everything we have stands outside his office. The one proof that comes from inside it is the proof we're missing."
+
+Merritt lifted the two timbers and fitted the cut face against the sound one. The saw line held straight where the break in the sound piece ran wild. He set them down. "It's a clean answer to a plain question," he said. "It just isn't ours yet."
+
+"Is what we have enough," Halloway said.
+
+"For us, it's plenty." Verena laid two fingers on the slate. "For a man who has to certify a bridge and answer for signing it, we're one paper short, and it's the paper that puts Tancred's own hand in it. Everything else lets him say he was lied to same as the rest of us."
+
+"How long," Emory said.
+
+"Eight days." Verena looked at the slate. "Tavish, put it at the bottom and draw a line under it." He wrote the eight and drew the chalk beneath it twice.
+
+She stood up from the bench. "The paper we're short of came through one door in this town before it ever reached the works. Everything the company shipped, Orlo Whitfield signed for and wrote down. His ledgers are the inside of Tancred's office, sitting on a shelf behind his counter. We go to Orlo."
+
+The store stood three streets over, and the walk carried them past the works, where the arch rose open against the afternoon with its crown unfinished. Inside, Orlo had the stove going and no customers, and he came round the counter before the bell had finished.
+
+"I heard you were coming," he said. "I'll say it before you say anything to me. I'm ashamed. I stood in this store last month and let them run your name through the mud, and I sold flour to the men who did the loudest of it, and I never said one word. That's the truth, and I'm ashamed of it."
+
+Verena set her hand on the counter. "Then get your books down. Clear this off first."
+
+Orlo swept the tinned goods and a bolt of cloth to the far end with his forearm and lifted the ledgers off the shelf behind him, three of them, thick and dated along the spine. Verena turned the top one to the autumn pages and pushed it back across to him.
+
+"The falsework timber," she said. "The load that carried the cut member. Find me the consignment, and find me the sign-off. Whose hand is on the inspection."
+
+Orlo ran his thumb down the dated entries, turned a page, turned another, and stopped with his finger beneath a line. "Here. The load that went down to the falsework."
+
+Verena set her own finger to the top of the column and read the loads down in the order they came, counting them under her breath before she looked where he pointed. The consignment sat there, dated, the timber marked received and passed. The line kept for the company inspector's signature was blank.
+
+"Read me who passed it," she said.
+
+His finger moved to the empty space and stayed. "No name. It's marked passed, and there's no man's hand to the passing."
+
+"Whose hand should be there."
+
+"The company inspector's." Orlo turned two pages forward and two back, showing her the small regular signatures down the margin of every other load, and the one bare line. "Every load that ever came through here has it. This one only."
+
+He looked at it a long moment. "It's blank because he never let it be inspected," he said. "I remember it now, all of it. He signed the receiving in his own hand and told me the inspection was done up the line, and I wrote it passed on his word and never walked out to see." He put the ledgers and a bundle of loose bills into a flour sack and set it on the counter between them. "Take it. All of it. Whatever I've kept is yours."
+
+The stove had burned low while they worked, and the front of the store had gone cold around them. Verena left the sack where it sat and put her hand flat on the counter.
+
+"It's your voice that does this," she said. "My name is a charge in this town. I stood in front of the certifying man once already and watched him decide he could not hear a word out of me. He'll hear you. You've kept this store honest as long as there's been a town to keep it in, and every soul here knows it. When you stand up and tell him Tancred said the inspection was done up the line, it lands where nothing from my mouth can reach."
+
+Orlo went still. Then he reached under the counter and brought up a slim clothbound book with a broken corner. "The delivery receipts," he said. "My own copies. Every load signed for on the day it came down. The company kept its book and I kept mine, and mine still holds the pages the company would want burned." He squared it on top of the sack with two fingers. "Eight days. I'll have it ready to carry the day you send for it, and I'll walk it up to the man myself."
+
+"Do that," Verena said, "and be ready to say who told you to write it passed."
+
+"I'll say his name to his face."
+
+By the time they climbed to the works the sun had gone behind the ridge and the gorge had turned blue with cold. The arch stood clear of the falsework, its two haunches risen and the crown left open to the sky between them. Frost had come up along the cut stone and caught the last of the light in every joint.
+
+Verena drew her father's plumb-line from her pocket and let the bob down against the standing course. The weight settled and hung true. She read it, then moved along the course and dropped it again. The line told her the wall stood plumb to the last stone laid.
+
+She turned to the ones who had come up with her. Merritt at her shoulder, Emory favoring his arm, Halloway, Sabra with a shawl drawn over her head, Tavish holding a lantern high so the open crown showed against the sky. Verena set her hand on the top course and counted it for them out loud.
+
+"Here is the whole of it," she said. "We do two things at once, and we do them both before the clause falls in eight days. We prove what Tancred did, with the timber and the doctor's word and Orlo's books, and we set it in front of the certifying man while there is still a bridge worth certifying. And we finish the bridge. Four courses on this haunch, four on the far one, and the keystone. That is what stands between this town and losing it. Eight days, four courses a side, and the key."
+
+"Eight days to do what the company gave itself a whole season for," Sabra said.
+
+"They had a season to do it crooked." Verena ran her thumb along the frost on the top stone. "We have eight days to do it right, and every one of us has watched it done from the road a hundred times. Plumb the course, wet the bed, set the stone, and again after that. Eight days of that and the arch is closed over."
+
+"I'll carry the proof down while you carry the stone up," Merritt said. "Orlo brings his books, Emory brings the cut, Halloway brings her notes, and I set the three of them in front of the man the day the key goes in."
+
+"The same day, then." Verena looked from the open crown to Merritt. "Both halves land together, or Tancred slips one of them free while we're bent over the other. The bridge and the truth close over in the same hour or we've done neither."
+
+"You'll want the good stone up first, while there's men fresh to lift it," Emory said.
+
+"Then that's where you start. You call the lift and I'll call the set." She looked from him to the open crown. "I stop asking tonight whether the town will come. I'm telling it what to carry when it does."
+
+They had started down the path while she was still speaking. She heard them before she saw them, boots on the frozen scree and the knock of iron against wood. Men came down with trowels rolled in leather aprons. Two more brought a hod and a barrow between them. A woman carried a bucket of mortar still warm enough to steam and set it at the foot of the falsework.
+
+Tavish went along the base with the lanterns, and the light came up yellow under the belly of the arch.
+
+Emory came to the foot of the ramp and put his good hand on it. One of the younger men stepped in and shouldered a dressed stone up the ramp for him. Emory climbed beside it and set his hand where the stone should go.
+
+"Mortar to the north haunch," Verena said. "Tavish, keep the lanterns climbing with us. Merritt, count me the stones dressed and ready. I want the number before full dark."
+
+"You'll have it, Verena," Merritt said.
+
+"North side, first course," Emory called down. "Who's lifting."
+
+She pulled her father's gloves from her belt, set her hand to the first stone of the north course, and went up onto the arch to set it.
